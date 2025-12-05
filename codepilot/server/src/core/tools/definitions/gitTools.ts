@@ -1,21 +1,17 @@
 /**
- * Git-related tools for version control operations.
- * These tools provide convenient wrappers around common git commands.
+ * Git tools - version control operations.
+ * Category: git
  */
 
 import { execFile } from 'child_process';
 import util from 'util';
-import path from 'path';
-import type { ToolDefinition, ToolContext } from '../types';
-import { resolvePath, toRelativePath } from './utils';
+import type { ToolDefinition } from '../types';
+import { resolvePath, toRelativePath } from '../../../tools/utils';
 
-// Use execFile instead of exec to prevent shell injection attacks.
-// execFile runs the binary directly with an args array, no shell involved.
 const execFileAsync = util.promisify(execFile);
 
 /**
  * Show git diff for a file or the entire working directory.
- * When a user asks to "show diff" or "what changed", this is the tool to use.
  */
 export const gitDiffTool: ToolDefinition = {
   name: 'git_diff',
@@ -32,48 +28,52 @@ export const gitDiffTool: ToolDefinition = {
       },
       ref: {
         type: 'string',
-        description: 'Git ref to compare against (e.g., "HEAD~1", "main", a commit SHA). Defaults to HEAD (staged + unstaged changes)',
+        description: 'Git ref to compare against (e.g., "HEAD~1", "main", a commit SHA)',
       },
       staged: {
         type: 'boolean',
-        description: 'If true, show only staged changes (--cached). Default false shows all changes.',
+        description: 'If true, show only staged changes (--cached). Default false.',
       },
     },
     required: [],
   },
-  async handler(input, context: ToolContext) {
+  metadata: {
+    category: 'git',
+    inputExamples: [
+      {},
+      { path: 'src/index.ts' },
+      { ref: 'HEAD~1' },
+    ],
+  },
+  async handler(input, context) {
     const filePath = input.path as string | undefined;
     const ref = input.ref as string | undefined;
     const staged = input.staged as boolean | undefined;
-
     const workingDir = context.workingDir;
 
-    // Build git diff command
     const args: string[] = ['diff'];
-    
+
     if (staged) {
       args.push('--cached');
     }
-    
+
     if (ref) {
       args.push(ref);
     }
-    
-    // Add path if specified - use path.relative for robust path handling
+
     if (filePath) {
       const absolutePath = resolvePath(filePath, workingDir);
       const relativePath = toRelativePath(absolutePath, workingDir);
       args.push('--', relativePath);
     }
 
-    // Build command string for display/debugging (not used for execution)
     const command = `git ${args.join(' ')}`;
 
     try {
       const { stdout, stderr } = await execFileAsync('git', args, {
         cwd: workingDir,
         timeout: 30000,
-        maxBuffer: 1024 * 1024 * 5, // 5MB for large diffs
+        maxBuffer: 1024 * 1024 * 5,
       });
 
       return {
@@ -91,7 +91,6 @@ export const gitDiffTool: ToolDefinition = {
         message?: string;
       };
 
-      // Git diff returns non-zero when there are no changes in some cases
       if (execError.stdout !== undefined) {
         return {
           command,
@@ -125,7 +124,10 @@ export const gitStatusTool: ToolDefinition = {
     },
     required: [],
   },
-  async handler(input, context: ToolContext) {
+  metadata: {
+    category: 'git',
+  },
+  async handler(input, context) {
     const short = input.short as boolean | undefined;
     const workingDir = context.workingDir;
 
@@ -134,7 +136,6 @@ export const gitStatusTool: ToolDefinition = {
       args.push('--short');
     }
 
-    // Build command string for display/debugging (not used for execution)
     const command = `git ${args.join(' ')}`;
 
     try {
@@ -181,26 +182,26 @@ export const gitLogTool: ToolDefinition = {
     },
     required: [],
   },
-  async handler(input, context: ToolContext) {
+  metadata: {
+    category: 'git',
+  },
+  async handler(input, context) {
     const count = (input.count as number) || 10;
     const filePath = input.path as string | undefined;
-    const oneline = input.oneline !== false; // Default true
-
+    const oneline = input.oneline !== false;
     const workingDir = context.workingDir;
 
     const args = ['log', `-${count}`];
     if (oneline) {
       args.push('--oneline');
     }
-    
-    // Add path if specified - use path.relative for robust path handling
+
     if (filePath) {
       const absolutePath = resolvePath(filePath, workingDir);
       const relativePath = toRelativePath(absolutePath, workingDir);
       args.push('--', relativePath);
     }
 
-    // Build command string for display/debugging (not used for execution)
     const command = `git ${args.join(' ')}`;
 
     try {
@@ -221,4 +222,13 @@ export const gitLogTool: ToolDefinition = {
     }
   },
 };
+
+/**
+ * All git tools.
+ */
+export const gitTools: ToolDefinition[] = [
+  gitDiffTool,
+  gitStatusTool,
+  gitLogTool,
+];
 

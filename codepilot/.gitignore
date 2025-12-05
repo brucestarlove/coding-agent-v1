@@ -24,9 +24,14 @@ Thumbs.db
 *.log
 npm-debug.log*
 pnpm-debug.log*
+.pnpm-store
 
 # TypeScript
 *.tsbuildinfo
 
 # Vite
 vite.config.ts.timestamp-*
+
+# SQLite database
+data/
+*.db

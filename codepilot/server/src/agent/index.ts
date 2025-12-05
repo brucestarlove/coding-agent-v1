@@ -4,9 +4,9 @@
  */
 
 // Main agent loop
-export { runAgentLoop, type AgentLoopConfig } from './loop';
+export { runAgentLoop, getAvailableTools, type AgentLoopConfig } from './loop';
 
-// Message helpers and types
+// Message helpers and types (legacy - for backward compatibility)
 export {
   CODING_AGENT_SYSTEM_PROMPT,
   systemMessage,

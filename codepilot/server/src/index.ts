@@ -20,7 +20,14 @@ if (result.error) {
 import { Elysia } from 'elysia';
 import { node } from '@elysiajs/node';
 import { tools } from './tools/index';
-import { chatRoutes, streamRoutes } from './routes/index';
+import { chatRoutes, streamRoutes, plansRoutes } from './routes/index';
+import { getAvailableModels } from './llm-client';
+import { getDropdownCommands } from './agent/commands';
+
+// Re-export core modules for library usage
+export * from './core/tools';
+export * from './providers';
+export { runAgentLoop } from './agent';
 
 // Server port from environment or default
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3001;
@@ -33,7 +40,7 @@ const app = new Elysia({ adapter: node() })
   // CORS headers for cross-origin requests from frontend
   .onRequest(({ set }) => {
     set.headers['Access-Control-Allow-Origin'] = CORS_ORIGIN;
-    set.headers['Access-Control-Allow-Methods'] = 'GET, POST, DELETE, OPTIONS';
+    set.headers['Access-Control-Allow-Methods'] = 'GET, POST, PATCH, DELETE, OPTIONS';
     set.headers['Access-Control-Allow-Headers'] = 'Content-Type';
   })
   // Handle preflight OPTIONS requests
@@ -56,9 +63,38 @@ const app = new Elysia({ adapter: node() })
     })),
   }))
 
+  // List available LLM models with context window sizes
+  .get('/api/models', () => {
+    const models = getAvailableModels();
+    // Context windows for Claude models (in tokens)
+    const CONTEXT_WINDOWS = {
+      haiku: 200000,
+      sonnet: 200000,
+      opus: 200000,
+    };
+    return {
+      models: [
+        { id: models.haiku, name: 'Claude Haiku', description: 'Fast and efficient', contextWindow: CONTEXT_WINDOWS.haiku },
+        { id: models.sonnet, name: 'Claude Sonnet', description: 'Balanced performance', contextWindow: CONTEXT_WINDOWS.sonnet },
+        { id: models.opus, name: 'Claude Opus', description: 'Most capable', contextWindow: CONTEXT_WINDOWS.opus },
+      ],
+      default: models.sonnet,
+    };
+  })
+
+  // List available agent commands
+  .get('/api/commands', () => {
+    const commands = getDropdownCommands();
+    return {
+      commands,
+      default: 'chat',
+    };
+  })
+
   // Register API routes
   .use(chatRoutes)
   .use(streamRoutes)
+  .use(plansRoutes)
 
   .listen(PORT);
 

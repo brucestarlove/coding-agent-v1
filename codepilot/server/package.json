@@ -6,19 +6,28 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsup",
-    "start": "NODE_ENV=production node dist/index.js"
+    "start": "NODE_ENV=production node dist/index.js",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
     "@elysiajs/node": "^1.2.11",
+    "better-sqlite3": "^12.5.0",
     "dotenv": "^17.2.3",
     "elysia": "^1.2.25",
-    "openai": "^4.77.3"
+    "openai": "^4.77.3",
+    "tiktoken": "^1.0.22"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/json-schema": "^7.0.15",
     "@types/node": "^22.10.2",
+    "@vitest/coverage-v8": "^2.1.0",
     "tsup": "^8.5.1",
     "tsx": "^4.19.2",
-    "typescript": "^5.7.2"
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.0"
   }
 }

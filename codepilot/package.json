@@ -8,7 +8,12 @@
     "dev:server": "pnpm --filter server dev",
     "dev:client": "pnpm --filter client dev",
     "build": "pnpm -r build",
-    "start": "pnpm --filter server start"
+    "start": "pnpm --filter server start",
+    "test": "pnpm -r test",
+    "test:server": "pnpm --filter server test",
+    "test:client": "pnpm --filter client test",
+    "test:watch": "pnpm -r test:watch",
+    "test:coverage": "pnpm --filter server test:coverage"
   },
   "engines": {
     "node": ">=18.0.0"

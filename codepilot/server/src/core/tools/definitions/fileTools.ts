@@ -1,11 +1,14 @@
 /**
- * File system tools for reading, writing, and listing files.
- * All operations are sandboxed to the project root directory.
+ * File system tools - read, write, edit, and list files.
+ * Category: file_ops
  */
 
 import fs from 'fs/promises';
-import type { ToolDefinition, ToolContext } from '../types';
-import { resolvePath } from './utils';
+import path from 'path';
+import type { ToolDefinition } from '../types';
+
+// Import the path utilities from the old location (will be moved later)
+import { resolvePath } from '../../../tools/utils';
 
 /**
  * Read a UTF-8 text file from the project workspace.
@@ -23,7 +26,15 @@ export const readFileTool: ToolDefinition = {
     },
     required: ['path'],
   },
-  async handler(input, context: ToolContext) {
+  metadata: {
+    category: 'file_ops',
+    highFrequency: true,
+    inputExamples: [
+      { path: 'package.json' },
+      { path: 'src/index.ts' },
+    ],
+  },
+  async handler(input, context) {
     const filePath = input.path as string;
     const absolutePath = resolvePath(filePath, context.workingDir);
     const content = await fs.readFile(absolutePath, 'utf8');
@@ -52,13 +63,17 @@ export const writeFileTool: ToolDefinition = {
     },
     required: ['path', 'content'],
   },
-  async handler(input, context: ToolContext) {
+  metadata: {
+    category: 'file_ops',
+    highFrequency: true,
+  },
+  async handler(input, context) {
     const filePath = input.path as string;
     const content = input.content as string;
     const absolutePath = resolvePath(filePath, context.workingDir);
 
     // Ensure parent directory exists
-    const dir = absolutePath.substring(0, absolutePath.lastIndexOf('/'));
+    const dir = path.dirname(absolutePath);
     if (dir) {
       await fs.mkdir(dir, { recursive: true });
     }
@@ -84,7 +99,15 @@ export const listDirTool: ToolDefinition = {
     },
     required: ['path'],
   },
-  async handler(input, context: ToolContext) {
+  metadata: {
+    category: 'file_ops',
+    highFrequency: true,
+    inputExamples: [
+      { path: '.' },
+      { path: 'src' },
+    ],
+  },
+  async handler(input, context) {
     const dirPath = (input.path as string) || '.';
     const absolutePath = resolvePath(dirPath, context.workingDir);
     const entries = await fs.readdir(absolutePath, { withFileTypes: true });
@@ -106,7 +129,6 @@ interface EditBlock {
 
 /**
  * Apply targeted edits to a file using search/replace blocks.
- * More precise than write_file - only changes specific sections.
  */
 export const editFileTool: ToolDefinition = {
   name: 'edit_file',
@@ -142,7 +164,11 @@ export const editFileTool: ToolDefinition = {
     },
     required: ['path', 'edits'],
   },
-  async handler(input, context: ToolContext) {
+  metadata: {
+    category: 'file_ops',
+    highFrequency: true,
+  },
+  async handler(input, context) {
     const filePath = input.path as string;
     const edits = input.edits as EditBlock[];
     const absolutePath = resolvePath(filePath, context.workingDir);
@@ -151,7 +177,7 @@ export const editFileTool: ToolDefinition = {
     const originalContent = await fs.readFile(absolutePath, 'utf8');
     let newContent = originalContent;
 
-    // Track which edits were applied with replacement counts
+    // Track which edits were applied
     const appliedEdits: Array<{
       old_text: string;
       new_text: string;
@@ -160,21 +186,16 @@ export const editFileTool: ToolDefinition = {
       warning?: string;
     }> = [];
 
-    // Apply each edit - match against ORIGINAL content, not accumulating newContent
+    // Apply each edit
     for (const edit of edits) {
-      // Check if pattern exists in ORIGINAL content (not affected by previous edits)
       const existsInOriginal = originalContent.includes(edit.old_text);
-
-      // Count occurrences using split (split produces N+1 parts for N occurrences)
       const occurrenceCount = newContent.split(edit.old_text).length - 1;
       const wasApplied = occurrenceCount > 0;
 
       if (wasApplied) {
-        // Global replace using split/join (Node 14 compatible, avoids replaceAll)
         newContent = newContent.split(edit.old_text).join(edit.new_text);
       }
 
-      // Build warning message if needed
       let warning: string | undefined;
       if (occurrenceCount > 1) {
         warning = `Multiple occurrences (${occurrenceCount}) were replaced`;
@@ -185,13 +206,13 @@ export const editFileTool: ToolDefinition = {
       appliedEdits.push({
         old_text: edit.old_text,
         new_text: edit.new_text,
-        applied: existsInOriginal, // Report based on original content
+        applied: existsInOriginal,
         replacements: occurrenceCount,
         warning,
       });
     }
 
-    // Check if any edits failed to find their target in the original content
+    // Check for failed edits
     const failedEdits = appliedEdits.filter((e) => !e.applied);
     if (failedEdits.length > 0) {
       const failedTexts = failedEdits
@@ -203,10 +224,9 @@ export const editFileTool: ToolDefinition = {
       );
     }
 
-    // Write the modified content
+    // Write modified content
     await fs.writeFile(absolutePath, newContent, 'utf8');
 
-    // Calculate total replacements made
     const totalReplacements = appliedEdits.reduce((sum, e) => sum + e.replacements, 0);
 
     return {
@@ -224,3 +244,14 @@ export const editFileTool: ToolDefinition = {
     };
   },
 };
+
+/**
+ * All file operation tools.
+ */
+export const fileTools: ToolDefinition[] = [
+  readFileTool,
+  writeFileTool,
+  listDirTool,
+  editFileTool,
+];
+

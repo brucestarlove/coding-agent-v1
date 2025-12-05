@@ -1,17 +1,20 @@
 /**
  * Stream Routes
- * Handles SSE streaming and session interruption
+ * Handles SSE streaming, session info, and session listing
  */
 
 import { Elysia, t, sse } from 'elysia';
-import { getSession, deleteSession } from '../session';
+import { getSession, deleteSession, getSessionInfo, listSessions, getMessages, updateSessionTitle } from '../session';
 
 /**
  * Stream route plugin
  * GET /api/stream/:id - SSE stream of agent events
  * POST /api/stop/:id - Abort a running agent
  * GET /api/session/:id - Get session info
+ * PATCH /api/session/:id - Update session (title)
+ * GET /api/session/:id/messages - Get session message history
  * DELETE /api/session/:id - Delete a session
+ * GET /api/sessions - List all sessions
  */
 export const streamRoutes = new Elysia({ prefix: '/api' })
   /**
@@ -82,23 +85,82 @@ export const streamRoutes = new Elysia({ prefix: '/api' })
 
   /**
    * Get session info
+   * Returns accurate messageCount and totalTokens from database
    */
   .get(
     '/session/:id',
     ({ params }) => {
-      const session = getSession(params.id);
+      const sessionInfo = getSessionInfo(params.id);
 
-      if (!session) {
+      if (!sessionInfo) {
         return { success: false, error: `Session not found: ${params.id}` };
       }
 
-      // Return session info (excluding internal fields like abortController)
       return {
-        id: session.id,
-        status: session.status,
-        workingDir: session.workingDir,
-        createdAt: session.createdAt.toISOString(),
-        messageCount: session.messages.length,
+        id: sessionInfo.id,
+        status: sessionInfo.status,
+        workingDir: sessionInfo.workingDir,
+        title: sessionInfo.title,
+        createdAt: sessionInfo.createdAt,
+        updatedAt: sessionInfo.updatedAt,
+        messageCount: sessionInfo.messageCount,
+        totalTokens: sessionInfo.totalTokens,
+      };
+    },
+    {
+      params: t.Object({
+        id: t.String(),
+      }),
+    }
+  )
+
+  /**
+   * Update session (title)
+   */
+  .patch(
+    '/session/:id',
+    ({ params, body, set }) => {
+      const { title } = body;
+
+      const updated = updateSessionTitle(params.id, title);
+
+      if (!updated) {
+        set.status = 404;
+        return { error: `Session not found: ${params.id}` };
+      }
+
+      return { success: true, title };
+    },
+    {
+      params: t.Object({
+        id: t.String(),
+      }),
+      body: t.Object({
+        title: t.String({ minLength: 1, maxLength: 255 }),
+      }),
+    }
+  )
+
+  /**
+   * Get session message history
+   * Returns full conversation from database
+   */
+  .get(
+    '/session/:id/messages',
+    ({ params, set }) => {
+      const sessionInfo = getSessionInfo(params.id);
+
+      if (!sessionInfo) {
+        set.status = 404;
+        return { error: `Session not found: ${params.id}` };
+      }
+
+      const messages = getMessages(params.id);
+
+      return {
+        sessionId: params.id,
+        messages,
+        count: messages.length,
       };
     },
     {
@@ -125,6 +187,38 @@ export const streamRoutes = new Elysia({ prefix: '/api' })
     {
       params: t.Object({
         id: t.String(),
+      }),
+    }
+  )
+
+  /**
+   * List all sessions with summaries
+   * Supports pagination via query params
+   */
+  .get(
+    '/sessions',
+    ({ query }) => {
+      const limit = query.limit ? parseInt(query.limit, 10) : 20;
+      const offset = query.offset ? parseInt(query.offset, 10) : 0;
+
+      // Clamp limit to reasonable bounds
+      const clampedLimit = Math.min(Math.max(1, limit), 100);
+      const clampedOffset = Math.max(0, offset);
+
+      const { sessions, total } = listSessions(clampedLimit, clampedOffset);
+
+      return {
+        sessions,
+        total,
+        limit: clampedLimit,
+        offset: clampedOffset,
+        hasMore: clampedOffset + sessions.length < total,
+      };
+    },
+    {
+      query: t.Object({
+        limit: t.Optional(t.String()),
+        offset: t.Optional(t.String()),
       }),
     }
   );
