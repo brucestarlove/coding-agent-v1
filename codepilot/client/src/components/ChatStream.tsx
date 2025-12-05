@@ -76,6 +76,13 @@ export function ChatStream() {
  * Empty state when no messages exist.
  */
 function EmptyState() {
+  const setSessionSheetOpen = useAgentStore((state) => state.setSessionSheetOpen);
+
+  const handleChooseDirectory = () => {
+    // Stub - to be implemented with file picker
+    console.log('[EmptyState] Choose Directory clicked - not yet implemented');
+  };
+
   return (
     <div className="h-full flex flex-col items-center justify-center text-center">
       {/* Synthetic Star - pulsing orb */}
@@ -97,6 +104,43 @@ function EmptyState() {
         <ExamplePrompt text="Create a hello.ts file with a greeting function" />
         <ExamplePrompt text="Read package.json and summarize the dependencies" />
         <ExamplePrompt text="Run ls -la and explain the output" />
+      </div>
+
+      {/* Action buttons */}
+      <div className="mt-8 flex gap-4 justify-center">
+        <button
+          onClick={handleChooseDirectory}
+          className="
+            px-5 py-2.5 rounded-lg text-sm font-medium
+            bg-white/5 border border-white/10
+            text-white/60 hover:text-white/90 hover:bg-white/10 hover:border-violet-500/30
+            transition-all duration-200
+            flex items-center gap-2
+          "
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+          </svg>
+          Choose Directory
+        </button>
+
+        <button
+          onClick={() => setSessionSheetOpen(true)}
+          className="
+            px-5 py-2.5 rounded-lg text-sm font-medium
+            bg-violet-500/20 border border-violet-500/30
+            text-violet-300 hover:text-violet-200 hover:bg-violet-500/30
+            transition-all duration-200
+            flex items-center gap-2
+          "
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+            <line x1="3" y1="9" x2="21" y2="9" />
+            <line x1="9" y1="21" x2="9" y2="9" />
+          </svg>
+          Select Session
+        </button>
       </div>
     </div>
   );

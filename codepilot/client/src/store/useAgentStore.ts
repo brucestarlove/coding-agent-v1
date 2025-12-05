@@ -52,6 +52,19 @@ export interface ModelOption {
   contextWindow: number;
 }
 
+/** Session summary for listing */
+export interface SessionSummary {
+  id: string;
+  status: string;
+  workingDir: string;
+  title: string | null;
+  createdAt: string;
+  updatedAt: string;
+  messageCount: number;
+  totalTokens: number;
+  preview: string | null;
+}
+
 // ============================================================================
 // Store Interface
 // ============================================================================
@@ -59,6 +72,7 @@ export interface ModelOption {
 interface AgentState {
   // Session state
   sessionId: string | null;
+  sessionTitle: string | null;
   status: AgentStatus;
   error: string | null;
   /** Current working directory for tool operations */
@@ -83,6 +97,10 @@ interface AgentState {
   // Last message for retry functionality
   lastUserMessage: string | null;
 
+  // Session management
+  sessions: SessionSummary[];
+  isSessionSheetOpen: boolean;
+
   // Actions
   sendMessage: (text: string) => Promise<void>;
   stopAgent: () => Promise<void>;
@@ -97,6 +115,13 @@ interface AgentState {
   // Model selection
   setSelectedModel: (modelId: string) => void;
   fetchAvailableModels: () => Promise<void>;
+
+  // Session management actions
+  fetchSessions: () => Promise<void>;
+  loadSession: (sessionId: string) => Promise<void>;
+  deleteSession: (sessionId: string) => Promise<void>;
+  updateSessionTitle: (sessionId: string, title: string) => Promise<void>;
+  setSessionSheetOpen: (open: boolean) => void;
 
   // Streaming handlers (called by useSSE hook)
   appendText: (text: string) => void;
@@ -120,6 +145,7 @@ const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3001/api
 export const useAgentStore = create<AgentState>((set, get) => ({
   // Initial state
   sessionId: null,
+  sessionTitle: null,
   status: 'idle',
   error: null,
   workingDir: null,
@@ -129,6 +155,8 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   selectedModel: null,
   availableModels: [],
   lastUserMessage: null,
+  sessions: [],
+  isSessionSheetOpen: false,
 
   /**
    * Send a message to start a new conversation or continue existing one.
@@ -245,6 +273,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   clearSession: () => {
     set({
       sessionId: null,
+      sessionTitle: null,
       status: 'idle',
       error: null,
       workingDir: null,
@@ -353,6 +382,202 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       console.error('[Store] Failed to fetch models:', err);
     }
   },
+
+  // ============================================================================
+  // Session Management Actions
+  // ============================================================================
+
+  /**
+   * Fetch all sessions from the server
+   */
+  fetchSessions: async () => {
+    try {
+      const response = await fetch(`${API_BASE}/sessions?limit=100`);
+      if (!response.ok) {
+        throw new Error(`Failed to fetch sessions: ${response.status}`);
+      }
+      const data = await response.json();
+      set({ sessions: data.sessions });
+    } catch (err) {
+      console.error('[Store] Failed to fetch sessions:', err);
+    }
+  },
+
+  /**
+   * Load a session by ID - fetches messages and sets up state
+   */
+  loadSession: async (sessionId: string) => {
+    try {
+      // Fetch session info
+      const sessionResponse = await fetch(`${API_BASE}/session/${sessionId}`);
+      if (!sessionResponse.ok) {
+        throw new Error(`Failed to fetch session: ${sessionResponse.status}`);
+      }
+      const sessionData = await sessionResponse.json();
+
+      // Fetch messages
+      const messagesResponse = await fetch(`${API_BASE}/session/${sessionId}/messages`);
+      if (!messagesResponse.ok) {
+        throw new Error(`Failed to fetch messages: ${messagesResponse.status}`);
+      }
+      const messagesData = await messagesResponse.json();
+
+      // Convert server messages to client Message format
+      const messages: Message[] = [];
+      let currentAssistantContent: ContentBlock[] = [];
+      
+      for (const msg of messagesData.messages) {
+        if (msg.role === 'user') {
+          messages.push({
+            id: crypto.randomUUID(),
+            role: 'user',
+            content: msg.content || '',
+            timestamp: new Date(),
+          });
+        } else if (msg.role === 'assistant') {
+          // Finalize any previous assistant content
+          if (currentAssistantContent.length > 0) {
+            messages.push({
+              id: crypto.randomUUID(),
+              role: 'assistant',
+              content: currentAssistantContent,
+              timestamp: new Date(),
+            });
+            currentAssistantContent = [];
+          }
+
+          // Add text content if present
+          if (msg.content) {
+            currentAssistantContent.push({ type: 'text', text: msg.content });
+          }
+
+          // Add tool calls if present
+          if (msg.tool_calls) {
+            for (const tc of msg.tool_calls) {
+              currentAssistantContent.push({
+                type: 'tool_call',
+                toolCall: {
+                  id: tc.id,
+                  name: tc.function.name,
+                  input: JSON.parse(tc.function.arguments || '{}'),
+                  status: 'completed',
+                },
+              });
+            }
+          }
+        } else if (msg.role === 'tool') {
+          // Find the matching tool call and update its result
+          for (const block of currentAssistantContent) {
+            if (block.type === 'tool_call' && block.toolCall.id === msg.tool_call_id) {
+              try {
+                block.toolCall.result = JSON.parse(msg.content);
+              } catch {
+                block.toolCall.result = msg.content;
+              }
+            }
+          }
+        }
+      }
+
+      // Finalize any remaining assistant content
+      if (currentAssistantContent.length > 0) {
+        messages.push({
+          id: crypto.randomUUID(),
+          role: 'assistant',
+          content: currentAssistantContent,
+          timestamp: new Date(),
+        });
+      }
+
+      // Update store state
+      set({
+        sessionId,
+        sessionTitle: sessionData.title,
+        workingDir: sessionData.workingDir,
+        messages,
+        currentContent: [],
+        tokenUsage: sessionData.totalTokens ? { prompt: 0, completion: 0, total: sessionData.totalTokens } : null,
+        status: 'idle',
+        error: null,
+        isSessionSheetOpen: false,
+      });
+    } catch (err) {
+      console.error('[Store] Failed to load session:', err);
+    }
+  },
+
+  /**
+   * Delete a session by ID
+   */
+  deleteSession: async (sessionId: string) => {
+    try {
+      const response = await fetch(`${API_BASE}/session/${sessionId}`, {
+        method: 'DELETE',
+      });
+
+      if (!response.ok) {
+        throw new Error(`Failed to delete session: ${response.status}`);
+      }
+
+      // Remove from local sessions list
+      set({
+        sessions: get().sessions.filter((s) => s.id !== sessionId),
+      });
+
+      // If this was the current session, clear it
+      if (get().sessionId === sessionId) {
+        get().clearSession();
+      }
+    } catch (err) {
+      console.error('[Store] Failed to delete session:', err);
+    }
+  },
+
+  /**
+   * Update session title
+   */
+  updateSessionTitle: async (sessionId: string, title: string) => {
+    try {
+      const response = await fetch(`${API_BASE}/session/${sessionId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Failed to update title: ${response.status}`);
+      }
+
+      // Update local sessions list
+      set({
+        sessions: get().sessions.map((s) =>
+          s.id === sessionId ? { ...s, title } : s
+        ),
+      });
+
+      // Update current session title if this is the active session
+      if (get().sessionId === sessionId) {
+        set({ sessionTitle: title });
+      }
+    } catch (err) {
+      console.error('[Store] Failed to update session title:', err);
+    }
+  },
+
+  /**
+   * Open/close the session sheet
+   */
+  setSessionSheetOpen: (open: boolean) => {
+    set({ isSessionSheetOpen: open });
+    // Fetch sessions when opening
+    if (open) {
+      get().fetchSessions();
+    }
+  },
+
+  // ============================================================================
+  // Streaming Handlers
+  // ============================================================================
 
   /**
    * Append streaming text delta to current response.

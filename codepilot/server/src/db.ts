@@ -51,11 +51,19 @@ function initSchema(db: Database.Database): void {
       id TEXT PRIMARY KEY,
       status TEXT NOT NULL DEFAULT 'idle',
       working_dir TEXT NOT NULL,
+      title TEXT,
       total_tokens INTEGER DEFAULT 0,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
   `);
+
+  // Add title column if it doesn't exist (migration for existing DBs)
+  try {
+    db.exec(`ALTER TABLE sessions ADD COLUMN title TEXT`);
+  } catch {
+    // Column already exists, ignore
+  }
 
   // Messages table
   db.exec(`
@@ -96,6 +104,7 @@ export interface DbSession {
   id: string;
   status: string;
   working_dir: string;
+  title: string | null;
   total_tokens: number;
   created_at: string;
   updated_at: string;
@@ -156,6 +165,17 @@ export function incrementDbSessionTokens(id: string, tokens: number): void {
     UPDATE sessions SET total_tokens = total_tokens + ?, updated_at = ? WHERE id = ?
   `);
   stmt.run(tokens, now, id);
+}
+
+/**
+ * Update session title
+ */
+export function updateDbSessionTitle(id: string, title: string): void {
+  const now = new Date().toISOString();
+  const stmt = getDb().prepare(`
+    UPDATE sessions SET title = ?, updated_at = ? WHERE id = ?
+  `);
+  stmt.run(title, now, id);
 }
 
 /**
@@ -325,7 +345,9 @@ export interface SessionSummary {
   id: string;
   status: string;
   workingDir: string;
+  title: string | null;
   createdAt: string;
+  updatedAt: string;
   messageCount: number;
   totalTokens: number;
   preview: string | null;
@@ -344,7 +366,9 @@ export function listSessionSummaries(
     id: s.id,
     status: s.status,
     workingDir: s.working_dir,
+    title: s.title,
     createdAt: s.created_at,
+    updatedAt: s.updated_at,
     messageCount: getMessageCount(s.id),
     totalTokens: s.total_tokens,
     preview: truncatePreview(getFirstUserMessage(s.id)),

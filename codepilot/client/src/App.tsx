@@ -8,6 +8,7 @@
 import React, { useEffect, useState } from 'react';
 import { ChatStream } from './components/ChatStream';
 import { InputArea } from './components/InputArea';
+import { SessionSheet } from './components/SessionSheet';
 import { useSSE } from './hooks/useSSE';
 import { useAgentStore } from './store/useAgentStore';
 
@@ -84,17 +85,25 @@ function App() {
         {/* Input area - The Helm */}
         <InputArea />
       </div>
+
+      {/* Session Sheet - slides down from top */}
+      <SessionSheet />
     </div>
   );
 }
 
 /**
- * Header component with branding and session status.
+ * Header component with branding, session indicator, and controls.
  */
 function Header({ currentThemeId, onThemeChange }: { currentThemeId: ThemeId; onThemeChange: (id: ThemeId) => void }) {
   const status = useAgentStore((state) => state.status);
   const sessionId = useAgentStore((state) => state.sessionId);
+  const sessionTitle = useAgentStore((state) => state.sessionTitle);
   const clearSession = useAgentStore((state) => state.clearSession);
+  const setSessionSheetOpen = useAgentStore((state) => state.setSessionSheetOpen);
+
+  // Display title or fallback
+  const displayTitle = sessionTitle || (sessionId ? 'Untitled Session' : 'New Session');
 
   return (
     <header className="border-b border-white/10 px-6 py-3 flex items-center justify-between bg-[hsl(222,84%,4%)]/80 backdrop-blur-md sticky top-0 z-50 transition-colors">
@@ -133,6 +142,37 @@ function Header({ currentThemeId, onThemeChange }: { currentThemeId: ThemeId; on
           })}
         </div>
       </div>
+
+      {/* Center - Session Indicator */}
+      <button
+        onClick={() => setSessionSheetOpen(true)}
+        className="
+          absolute left-1/2 -translate-x-1/2
+          px-4 py-1.5 rounded-lg
+          bg-white/5 border border-white/10
+          hover:bg-white/10 hover:border-violet-500/30
+          transition-all duration-200
+          flex items-center gap-2
+          group
+        "
+      >
+        <span className="text-sm text-white/70 group-hover:text-white/90 truncate max-w-[200px]">
+          {displayTitle}
+        </span>
+        <svg
+          width="12"
+          height="12"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          className="text-white/40 group-hover:text-white/60"
+        >
+          <polyline points="6 9 12 15 18 9" />
+        </svg>
+      </button>
 
       {/* Session controls */}
       <div className="flex items-center gap-3">

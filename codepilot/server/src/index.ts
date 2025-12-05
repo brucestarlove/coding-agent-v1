@@ -34,7 +34,7 @@ const app = new Elysia({ adapter: node() })
   // CORS headers for cross-origin requests from frontend
   .onRequest(({ set }) => {
     set.headers['Access-Control-Allow-Origin'] = CORS_ORIGIN;
-    set.headers['Access-Control-Allow-Methods'] = 'GET, POST, DELETE, OPTIONS';
+    set.headers['Access-Control-Allow-Methods'] = 'GET, POST, PATCH, DELETE, OPTIONS';
     set.headers['Access-Control-Allow-Headers'] = 'Content-Type';
   })
   // Handle preflight OPTIONS requests

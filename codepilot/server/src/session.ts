@@ -18,6 +18,7 @@ import {
   getDbSession,
   updateDbSessionStatus,
   updateDbSessionWorkingDir,
+  updateDbSessionTitle,
   deleteDbSession,
   incrementDbSessionTokens,
   insertMessage,
@@ -242,6 +243,19 @@ export function updateSessionWorkingDir(id: string, workingDir: string): boolean
 }
 
 /**
+ * Update session title
+ * Updates database (title not stored in memory cache)
+ * @returns true if session exists in database
+ */
+export function updateSessionTitle(id: string, title: string): boolean {
+  const dbSession = getDbSession(id);
+  if (!dbSession) return false;
+
+  updateDbSessionTitle(id, title);
+  return true;
+}
+
+/**
  * Persist a message to the database and update in-memory cache
  */
 export function persistMessage(
@@ -307,7 +321,9 @@ export interface SessionDTO {
   id: string;
   status: SessionState['status'];
   workingDir: string;
+  title: string | null;
   createdAt: string;
+  updatedAt: string;
   messageCount: number;
   totalTokens: number;
 }
@@ -323,7 +339,9 @@ export function getSessionInfo(id: string): SessionDTO | undefined {
     id: dbSession.id,
     status: dbSession.status as SessionState['status'],
     workingDir: dbSession.working_dir,
+    title: dbSession.title,
     createdAt: dbSession.created_at,
+    updatedAt: dbSession.updated_at,
     messageCount: getMessageCount(id),
     totalTokens: dbSession.total_tokens,
   };
@@ -349,7 +367,9 @@ export function getAllSessions(): SessionDTO[] {
     id: s.id,
     status: s.status,
     workingDir: s.workingDir,
+    title: null, // Not tracked in memory
     createdAt: s.createdAt.toISOString(),
+    updatedAt: s.createdAt.toISOString(), // Use createdAt as fallback
     messageCount: s.messages.length,
     totalTokens: s.totalTokens,
   }));

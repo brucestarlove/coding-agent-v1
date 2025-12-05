@@ -4,13 +4,14 @@
  */
 
 import { Elysia, t, sse } from 'elysia';
-import { getSession, deleteSession, getSessionInfo, listSessions, getMessages } from '../session';
+import { getSession, deleteSession, getSessionInfo, listSessions, getMessages, updateSessionTitle } from '../session';
 
 /**
  * Stream route plugin
  * GET /api/stream/:id - SSE stream of agent events
  * POST /api/stop/:id - Abort a running agent
  * GET /api/session/:id - Get session info
+ * PATCH /api/session/:id - Update session (title)
  * GET /api/session/:id/messages - Get session message history
  * DELETE /api/session/:id - Delete a session
  * GET /api/sessions - List all sessions
@@ -99,7 +100,9 @@ export const streamRoutes = new Elysia({ prefix: '/api' })
         id: sessionInfo.id,
         status: sessionInfo.status,
         workingDir: sessionInfo.workingDir,
+        title: sessionInfo.title,
         createdAt: sessionInfo.createdAt,
+        updatedAt: sessionInfo.updatedAt,
         messageCount: sessionInfo.messageCount,
         totalTokens: sessionInfo.totalTokens,
       };
@@ -107,6 +110,33 @@ export const streamRoutes = new Elysia({ prefix: '/api' })
     {
       params: t.Object({
         id: t.String(),
+      }),
+    }
+  )
+
+  /**
+   * Update session (title)
+   */
+  .patch(
+    '/session/:id',
+    ({ params, body, set }) => {
+      const { title } = body;
+
+      const updated = updateSessionTitle(params.id, title);
+
+      if (!updated) {
+        set.status = 404;
+        return { error: `Session not found: ${params.id}` };
+      }
+
+      return { success: true, title };
+    },
+    {
+      params: t.Object({
+        id: t.String(),
+      }),
+      body: t.Object({
+        title: t.String({ minLength: 1, maxLength: 255 }),
       }),
     }
   )
