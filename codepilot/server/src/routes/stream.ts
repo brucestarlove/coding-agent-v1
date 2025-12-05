@@ -89,7 +89,7 @@ export const streamRoutes = new Elysia({ prefix: '/api' })
       const session = getSession(params.id);
 
       if (!session) {
-        return { error: `Session not found: ${params.id}` };
+        return { success: false, error: `Session not found: ${params.id}` };
       }
 
       // Return session info (excluding internal fields like abortController)

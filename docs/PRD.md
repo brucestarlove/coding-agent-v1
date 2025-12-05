@@ -562,6 +562,83 @@ function ToolCallView({ toolCall }: { toolCall: ToolCall }) {
 
 ---
 
+### Phase 6.5: SQLite Persistence Layer
+**Duration**: 6-8 hours
+**Goal**: Replace in-memory sessions with SQLite database for persistent conversations
+
+#### Tasks
+
+- [ ] Set up SQLite database with migration system
+  - Choose SQLite library (better-sqlite3 for sync operations)
+  - Create database schema for sessions and messages
+  - Implement database initialization and migrations
+
+- [ ] Design database schema
+  ```sql
+  -- Sessions table
+  CREATE TABLE sessions (
+    id TEXT PRIMARY KEY,
+    status TEXT NOT NULL, -- 'idle', 'running', 'completed', 'failed'
+    working_dir TEXT NOT NULL,
+    created_at DATETIME NOT NULL,
+    updated_at DATETIME NOT NULL
+  );
+
+  -- Messages table (stores conversation history)
+  CREATE TABLE messages (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    role TEXT NOT NULL, -- 'user', 'assistant', 'tool', 'system'
+    content TEXT, -- Nullable for tool calls
+    tool_call_id TEXT, -- For tool results
+    tool_calls TEXT, -- JSON array for assistant tool calls
+    created_at DATETIME NOT NULL,
+    FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+  );
+  ```
+
+- [ ] Refactor session manager to use SQLite
+  - Update `SessionState` interface to include database operations
+  - Implement persistent `createSession()`, `getSession()`, `deleteSession()`
+  - Add message persistence (save user messages, assistant responses, tool calls/results)
+  - Maintain in-memory cache for active sessions with lazy loading
+
+- [ ] Update agent loop to persist messages
+  - Save user prompt when conversation starts
+  - Persist assistant text deltas as they stream
+  - Store tool calls and results in database
+  - Ensure conversation continuity across restarts
+
+- [ ] Add session listing and management
+  - `GET /api/sessions` - List recent sessions with metadata
+  - `GET /api/session/:id/messages` - Retrieve full conversation history
+  - `DELETE /api/session/:id` - Clean up old sessions
+  - Optional: Session export/import functionality
+
+- [ ] Handle database errors gracefully
+  - Fallback to in-memory mode if database fails
+  - Log database errors without crashing agent
+  - Implement database connection retry logic
+
+#### Success Criteria
+
+- [ ] Conversations persist across server restarts
+- [ ] Full message history is retrievable for any session
+- [ ] Database operations don't impact streaming performance
+- [ ] Graceful degradation if database is unavailable
+- [ ] Session listing shows recent conversations with status
+- [ ] No data loss during normal operation
+
+#### Benefits
+
+- **Persistence**: Conversations survive server restarts
+- **History**: Users can revisit past conversations
+- **Scalability**: Multiple concurrent sessions without memory issues
+- **Backup**: Database files can be easily backed up
+- **Analytics**: Conversation data available for analysis
+
+---
+
 ### Phase 7: Production Hardening
 **Duration**: 6-8 hours  
 **Goal**: Add robustness, reliability, and operational features for production use
@@ -593,6 +670,7 @@ function ToolCallView({ toolCall }: { toolCall: ToolCall }) {
 - [ ] Emit partial tool_call events during streaming (show tool name before args complete)
 - [ ] Reconnection logic for dropped SSE connections
 - [ ] Heartbeat/keepalive for long-running operations
+- [ ] Fix concurrent SSE connections (implement proper event broadcasting/multicast)
 
 #### 7.4 Security Hardening
 
@@ -781,9 +859,11 @@ MAX_TOKENS=4096                        # Max response tokens (default: 4096)
 | Phase 2: Claude Integration | 3-4 hours | 8-12 hours |
 | Phase 3: SSE Streaming API | 2-3 hours | 10-15 hours |
 | Phase 4: Basic Chat UI | 4-5 hours | 14-20 hours |
-| Phase 5: Tool Call UI | 4-5 hours | 18-25 hours |
-| Phase 6: Polish & Controls | 3-4 hours | 21-29 hours |
-| Phase 7: Production Hardening | 6-8 hours | 27-37 hours |
+| Phase 5: Tool Call UI | 4-5 hours | 24-33 hours |
+| Phase 6: Polish & Controls | 3-4 hours | 27-37 hours |
+| Phase 6.5: SQLite Persistence | 6-8 hours | 20-28 hours |
+| Phase 7: Production Hardening | 6-8 hours | 33-45 hours |
 
-**MVP (Phases 0-6)**: 21-29 hours (3-4 days of focused work)  
-**Production-Ready (Phases 0-7)**: 27-37 hours (4-5 days of focused work)
+**MVP (Phases 0-4)**: 14-20 hours (2-3 days of focused work)  
+**Full UI (Phases 4-6)**: 27-37 hours (4-5 days of focused work)  
+**Production-Ready (Phases 6-7)**: 33-45 hours (5-6 days of focused work)

@@ -123,8 +123,11 @@ export async function* runAgentLoop(config: AgentLoopConfig): AsyncGenerator<Str
     // Get the final parsed tool calls
     const parsedToolCalls = toolCallAccumulator.getToolCalls();
 
-    // If no tool calls, we're done
+    // If no tool calls, we're done - add assistant response to messages for conversation continuity
     if (!toolCallAccumulator.hasToolCalls()) {
+      if (contentAccumulator) {
+        messages.push({ role: 'assistant', content: contentAccumulator });
+      }
       yield { type: 'done' };
       break;
     }

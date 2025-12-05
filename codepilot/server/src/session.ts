@@ -4,6 +4,7 @@
  * Provides event queue pattern for streaming to SSE clients
  */
 
+import { randomUUID } from 'crypto';
 import type { ChatCompletionMessageParam } from 'openai/resources/chat/completions';
 import type { StreamEvent } from './types';
 
@@ -54,7 +55,7 @@ export class EventQueue {
     this.closed = true;
     // Resolve any waiting consumers with done
     for (const resolve of this.resolvers) {
-      resolve({ value: undefined as unknown as StreamEvent, done: true });
+      resolve({ value: undefined as any, done: true });
     }
     this.resolvers = [];
   }
@@ -80,7 +81,7 @@ export class EventQueue {
 
         // If closed, we're done
         if (this.closed) {
-          return Promise.resolve({ value: undefined as unknown as StreamEvent, done: true });
+          return Promise.resolve({ value: undefined as any, done: true });
         }
 
         // Otherwise, wait for next event
@@ -101,7 +102,7 @@ const sessions = new Map<string, SessionState>();
  * Generate a unique session ID
  */
 function generateSessionId(): string {
-  return `session_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+  return `session_${randomUUID()}`;
 }
 
 /**
@@ -166,11 +167,12 @@ export function updateSessionStatus(
  * Get all sessions (for debugging/admin)
  */
 export function getAllSessions(): SessionState[] {
-  return Array.from(sessions.values());
+  return Array.from(sessions.values()).map(s => ({ ...s }));
 }
 
 /**
  * Clear old sessions (cleanup utility)
+ * Can be called manually or integrated with future persistence layer (e.g., SQLite)
  * @param maxAgeMs - Maximum age in milliseconds (default: 1 hour)
  */
 export function cleanupOldSessions(maxAgeMs: number = 60 * 60 * 1000): number {

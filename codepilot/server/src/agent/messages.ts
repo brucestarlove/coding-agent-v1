@@ -128,7 +128,13 @@ export class ToolCallAccumulator {
     const existing = this.toolCalls.get(delta.index);
 
     if (existing) {
-      // Append to existing tool call
+      // Update existing tool call with new delta data
+      if (delta.id) {
+        existing.id = delta.id;
+      }
+      if (delta.function?.name) {
+        existing.name = delta.function.name;
+      }
       if (delta.function?.arguments) {
         existing.arguments += delta.function.arguments;
       }

@@ -11,8 +11,6 @@ import { tools } from '../tools/index';
 /**
  * Chat route plugin
  * POST /api/chat - Start a new conversation
- * GET /api/session/:id - Get session state (optional utility)
- * DELETE /api/session/:id - Clear a session (optional utility)
  */
 export const chatRoutes = new Elysia({ prefix: '/api' })
   /**
@@ -33,6 +31,7 @@ export const chatRoutes = new Elysia({ prefix: '/api' })
 
       // Spawn the agent loop (fire-and-forget)
       // Events are pushed to the session's event queue for SSE streaming
+      let hasError = false;
       (async () => {
         try {
           for await (const event of runAgentLoop({
@@ -43,22 +42,25 @@ export const chatRoutes = new Elysia({ prefix: '/api' })
             // Push each event to the session's event queue
             session.eventQueue.push(event);
 
-            // If this is a done or error event, update session status
+            // Track if any error events occurred
+            if (event.type === 'error') {
+              hasError = true;
+            }
+
+            // Update session status when done
             if (event.type === 'done') {
-              updateSessionStatus(session.id, 'completed');
-            } else if (event.type === 'error') {
-              // Note: error events are followed by done, so status will be updated to completed
-              // If we want to mark as failed, we could check if the last event was an error
+              updateSessionStatus(session.id, hasError ? 'failed' : 'completed');
             }
           }
         } catch (err) {
-          // Handle unexpected errors in the agent loop
+          // Handle unexpected errors in the agent loop (e.g., LLM API crashes)
           const errorMessage = err instanceof Error ? err.message : String(err);
+          console.error(`[Chat] Agent loop error for session ${session.id}:`, errorMessage);
           session.eventQueue.push({ type: 'error', error: errorMessage });
           session.eventQueue.push({ type: 'done' });
           updateSessionStatus(session.id, 'failed');
         } finally {
-          // Close the event queue when done
+          // Always close the event queue when done
           session.eventQueue.close();
         }
       })();

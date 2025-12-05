@@ -11,6 +11,9 @@ POST /api/chat → { sessionId } → GET /api/stream/:id (SSE)
                                             ↓
                                Yields: text_delta, tool_call, tool_result, done
 POST /api/stop/:id → Aborts running agent
+
+⚠️ LIMITATION: Only one SSE connection per session is supported.
+Multiple concurrent connections will compete for events and cause undefined behavior.
 ```
 
 ## Files to Create/Modify
@@ -93,14 +96,14 @@ Add optional `signal?: AbortSignal` to `AgentLoopConfig`:
 
 | POST | `/api/stop/:id` | - | `{ success }` |
 
-| GET | `/api/session/:id` | - | `Session` (optional) |
+| GET | `/api/session/:id` | - | `Session` |
 
-| DELETE | `/api/session/:id` | - | `{ success }` (optional) |
+| DELETE | `/api/session/:id` | - | `{ success }` |
 
 ## Key Design Decisions
 
 1. **Event Channel**: Use a simple async queue pattern where the agent loop pushes events, and SSE consumer pulls them
-2. **One stream per session**: Each session can have one active SSE connection
+2. **One stream per session**: Each session can have one active SSE connection. Concurrent connections to the same session are **not supported** - only the first connection will receive events reliably. Additional connections will compete for events from the shared queue, leading to undefined behavior. This is a known limitation that should be addressed in future iterations by implementing proper broadcast/multicast for events.
 3. **Abort via AbortController**: Standard pattern for cancellation
 4. **Session cleanup**: Sessions auto-expire or are deleted manually
 
