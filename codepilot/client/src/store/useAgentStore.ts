@@ -243,11 +243,11 @@ export const useAgentStore = create<AgentState>((set, get) => ({
 
   /**
    * Send a message to start a new conversation or continue existing one.
-   * Creates a new session via POST /api/chat and returns immediately.
+   * Creates a new session via POST /api/chat or continues via POST /api/chat/:id.
    * Events are streamed via SSE in useSSE hook.
    */
   sendMessage: async (text: string) => {
-    const { status } = get();
+    const { status, sessionId } = get();
 
     // Prevent sending while already streaming
     if (status === 'streaming') {
@@ -272,7 +272,6 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     });
 
     try {
-      // Start new conversation via API
       const { selectedModel, selectedCommand, selectedPlan, workingDir } = get();
       
       // If we have a selected plan and command is implement, include plan in message
@@ -283,14 +282,20 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         set({ selectedPlan: null });
       }
       
-      const response = await fetch(`${API_BASE}/chat`, {
+      // Determine endpoint: continue existing session or create new one
+      const endpoint = sessionId 
+        ? `${API_BASE}/chat/${sessionId}`  // Continue existing session
+        : `${API_BASE}/chat`;              // Create new session
+      
+      const response = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
           message: messageToSend,
           model: selectedModel || undefined,
           command: selectedCommand || undefined,
-          workingDir: workingDir || undefined,
+          // Only include workingDir for new sessions (existing sessions have it stored)
+          ...(sessionId ? {} : { workingDir: workingDir || undefined }),
         }),
       });
 
@@ -299,6 +304,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       }
 
       const data = await response.json();
+      // Update sessionId and workingDir (new sessions return these, continued sessions confirm them)
       set({ sessionId: data.sessionId, workingDir: data.workingDir });
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : String(err);

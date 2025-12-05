@@ -21,10 +21,10 @@ import {
   hasSessionPlan,
 } from '../session';
 import { runAgentLoop } from '../agent/index';
-import { tools } from '../tools/index';
 import { userMessage, assistantMessage, assistantToolCallMessage, toolResultMessage } from '../agent/messages';
 import { resolveCommand, getSystemPrompt, type CommandId } from '../agent/commands';
 import { savePlan, extractTitleFromContent, detectPlanType } from '../plans';
+import { fromOpenAIMessages, type CoreMessage } from '../providers';
 import type { ToolCall } from '../types';
 
 /**
@@ -123,8 +123,10 @@ export const chatRoutes = new Elysia({ prefix: '/api' })
       // Persist the new user message
       persistMessage(session.id, userMessage(message));
 
-      // Get existing conversation history from database
-      const conversationHistory = getMessages(session.id);
+      // Get existing conversation history from database and convert to CoreMessage format
+      // The DB stores messages in OpenAI format, but the agent loop expects CoreMessage format
+      const openAIHistory = getMessages(session.id);
+      const conversationHistory = fromOpenAIMessages(openAIHistory);
 
       // Get system prompt for the command (inject plan if relevant)
       const systemPrompt = getSystemPrompt(resolvedCommand.id, currentPlan);
@@ -228,7 +230,7 @@ function spawnAgentLoopWithHistory(
   sessionId: string,
   userPrompt: string,
   workingDir: string,
-  conversationHistory: ChatCompletionMessageParam[],
+  conversationHistory: CoreMessage[],
   model?: string,
   systemPrompt?: string,
   commandId?: CommandId
@@ -255,7 +257,7 @@ function runAgentLoopWithPersistence(
   session: ReturnType<typeof getSession>,
   userPrompt: string,
   workingDir: string,
-  conversationHistory: ChatCompletionMessageParam[] | undefined,
+  conversationHistory: CoreMessage[] | undefined,
   model?: string,
   systemPrompt?: string,
   commandId?: CommandId
@@ -272,7 +274,6 @@ function runAgentLoopWithPersistence(
     try {
       for await (const event of runAgentLoop({
         userPrompt,
-        tools,
         workingDir,
         conversationHistory,
         signal: session.abortController.signal,

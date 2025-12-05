@@ -147,3 +147,194 @@ export function toOpenAIMessages(messages: CoreMessage[]): ChatCompletionMessage
   return result;
 }
 
+// ============================================================================
+// Reverse Conversion: OpenAI format -> CoreMessage format
+// ============================================================================
+
+/**
+ * Convert OpenAI ChatCompletionMessageParam to CoreMessage format.
+ * Used when loading conversation history from the database.
+ */
+export function fromOpenAIMessage(message: ChatCompletionMessageParam): CoreMessage {
+  const role = message.role;
+
+  // System message
+  if (role === 'system') {
+    const content = 'content' in message ? message.content : '';
+    return {
+      role: 'system',
+      content: typeof content === 'string' ? content : '',
+    };
+  }
+
+  // User message
+  if (role === 'user') {
+    const content = 'content' in message ? message.content : '';
+    // Handle array content (multimodal) by extracting text
+    if (Array.isArray(content)) {
+      const textParts = content
+        .filter((part): part is { type: 'text'; text: string } => 
+          typeof part === 'object' && part !== null && 'type' in part && part.type === 'text'
+        )
+        .map(part => part.text);
+      return {
+        role: 'user',
+        content: textParts.join(''),
+      };
+    }
+    return {
+      role: 'user',
+      content: typeof content === 'string' ? content : '',
+    };
+  }
+
+  // Assistant message
+  if (role === 'assistant') {
+    const assistantMsg = message as {
+      role: 'assistant';
+      content?: string | null;
+      tool_calls?: Array<{
+        id: string;
+        type: 'function';
+        function: { name: string; arguments: string };
+      }>;
+    };
+
+    // Check for tool calls
+    if (assistantMsg.tool_calls && assistantMsg.tool_calls.length > 0) {
+      const contentBlocks: CoreContentBlock[] = [];
+      
+      // Add text content if present
+      if (assistantMsg.content) {
+        contentBlocks.push({ type: 'text', text: assistantMsg.content });
+      }
+      
+      // Add tool call blocks
+      for (const tc of assistantMsg.tool_calls) {
+        contentBlocks.push({
+          type: 'tool_call',
+          id: tc.id,
+          name: tc.function.name,
+          arguments: tc.function.arguments,
+        });
+      }
+      
+      return {
+        role: 'assistant',
+        content: contentBlocks,
+      };
+    }
+
+    // Text-only assistant message
+    return {
+      role: 'assistant',
+      content: assistantMsg.content || '',
+    };
+  }
+
+  // Tool result message - convert to user message with tool_result content block
+  // (In CoreMessage format, tool results are sent as user messages with special content)
+  if (role === 'tool') {
+    const toolMsg = message as {
+      role: 'tool';
+      tool_call_id: string;
+      content: string;
+    };
+    
+    return {
+      role: 'user',
+      content: [{
+        type: 'tool_result',
+        toolUseId: toolMsg.tool_call_id,
+        content: toolMsg.content,
+        isError: toolMsg.content.startsWith('Error:'),
+      }],
+    };
+  }
+
+  // Fallback for unknown roles
+  return {
+    role: 'user',
+    content: '',
+  };
+}
+
+/**
+ * Convert array of OpenAI ChatCompletionMessageParam to CoreMessage format.
+ * Used when loading conversation history from the database.
+ * 
+ * Note: This function groups consecutive tool result messages back into
+ * a single user message with multiple tool_result content blocks, matching
+ * how they were originally structured before being split for the OpenAI API.
+ */
+export function fromOpenAIMessages(messages: ChatCompletionMessageParam[]): CoreMessage[] {
+  const result: CoreMessage[] = [];
+  let pendingToolResults: Array<{ toolUseId: string; content: string; isError: boolean }> = [];
+
+  for (let i = 0; i < messages.length; i++) {
+    const message = messages[i];
+
+    // Collect consecutive tool messages
+    if (message.role === 'tool') {
+      const toolMsg = message as { role: 'tool'; tool_call_id: string; content: string };
+      pendingToolResults.push({
+        toolUseId: toolMsg.tool_call_id,
+        content: toolMsg.content,
+        isError: toolMsg.content.startsWith('Error:'),
+      });
+      
+      // Check if next message is also a tool message
+      const nextMessage = messages[i + 1];
+      if (nextMessage?.role === 'tool') {
+        continue; // Keep collecting tool results
+      }
+      
+      // Flush pending tool results as a single user message
+      if (pendingToolResults.length > 0) {
+        result.push({
+          role: 'user',
+          content: pendingToolResults.map(tr => ({
+            type: 'tool_result' as const,
+            toolUseId: tr.toolUseId,
+            content: tr.content,
+            isError: tr.isError,
+          })),
+        });
+        pendingToolResults = [];
+      }
+      continue;
+    }
+
+    // Flush any pending tool results before adding non-tool message
+    if (pendingToolResults.length > 0) {
+      result.push({
+        role: 'user',
+        content: pendingToolResults.map(tr => ({
+          type: 'tool_result' as const,
+          toolUseId: tr.toolUseId,
+          content: tr.content,
+          isError: tr.isError,
+        })),
+      });
+      pendingToolResults = [];
+    }
+
+    // Convert non-tool message
+    result.push(fromOpenAIMessage(message));
+  }
+
+  // Flush any remaining tool results
+  if (pendingToolResults.length > 0) {
+    result.push({
+      role: 'user',
+      content: pendingToolResults.map(tr => ({
+        type: 'tool_result' as const,
+        toolUseId: tr.toolUseId,
+        content: tr.content,
+        isError: tr.isError,
+      })),
+    });
+  }
+
+  return result;
+}

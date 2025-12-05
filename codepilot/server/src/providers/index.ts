@@ -23,3 +23,5 @@ export type {
 // OpenRouter
 export { OpenRouterAdapter, createOpenRouterAdapter } from './openrouter';
 
+// Message format conversion utilities
+export { fromOpenAIMessage, fromOpenAIMessages } from './openrouter/mapping';
