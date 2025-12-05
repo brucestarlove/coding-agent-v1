@@ -60,10 +60,28 @@ export async function* runAgentLoop(config: AgentLoopConfig): AsyncGenerator<Str
   // Initialize LLM client
   const llm = createLLMClient();
 
+  // Check if the client supports tool calling
+  if (!llm.capabilities.tools) {
+    yield {
+      type: 'error',
+      error: `LLM provider "${llm.provider}" does not support tool calling. Please use OpenRouter (set OPENROUTER_API_KEY).`,
+    };
+    yield { type: 'done' };
+    return;
+  }
+
   // Build initial messages array
-  const messages: ChatCompletionMessageParam[] = config.conversationHistory
-    ? [...config.conversationHistory]
-    : [systemMessage(systemPrompt)];
+  // If conversationHistory is provided, check if it already has a system message
+  // If not, prepend the systemPrompt to ensure it's not silently dropped
+  let messages: ChatCompletionMessageParam[];
+  if (config.conversationHistory) {
+    const hasSystemMessage = config.conversationHistory.some((msg) => msg.role === 'system');
+    messages = hasSystemMessage
+      ? [...config.conversationHistory]
+      : [systemMessage(systemPrompt), ...config.conversationHistory];
+  } else {
+    messages = [systemMessage(systemPrompt)];
+  }
 
   // Add the user's message
   messages.push(userMessage(userPrompt));
@@ -76,6 +94,7 @@ export async function* runAgentLoop(config: AgentLoopConfig): AsyncGenerator<Str
   }));
 
   let roundCount = 0;
+  let completedNaturally = false;
 
   // Main agent loop - continues until no tool calls or max rounds
   while (roundCount < MAX_TOOL_ROUNDS) {
@@ -128,6 +147,7 @@ export async function* runAgentLoop(config: AgentLoopConfig): AsyncGenerator<Str
       if (contentAccumulator) {
         messages.push({ role: 'assistant', content: contentAccumulator });
       }
+      completedNaturally = true;
       yield { type: 'done' };
       break;
     }
@@ -184,8 +204,8 @@ export async function* runAgentLoop(config: AgentLoopConfig): AsyncGenerator<Str
     }
   }
 
-  // If we hit max rounds, yield an error and done event for consistent completion signal
-  if (roundCount >= MAX_TOOL_ROUNDS) {
+  // If we hit max rounds without completing naturally, yield an error and done event
+  if (roundCount >= MAX_TOOL_ROUNDS && !completedNaturally) {
     yield {
       type: 'error',
       error: `Agent stopped after ${MAX_TOOL_ROUNDS} tool call rounds to prevent infinite loops`,

@@ -56,9 +56,13 @@ export const chatRoutes = new Elysia({ prefix: '/api' })
           // Handle unexpected errors in the agent loop (e.g., LLM API crashes)
           const errorMessage = err instanceof Error ? err.message : String(err);
           console.error(`[Chat] Agent loop error for session ${session.id}:`, errorMessage);
-          session.eventQueue.push({ type: 'error', error: errorMessage });
-          session.eventQueue.push({ type: 'done' });
-          updateSessionStatus(session.id, 'failed');
+          try {
+            session.eventQueue.push({ type: 'error', error: errorMessage });
+            session.eventQueue.push({ type: 'done' });
+            updateSessionStatus(session.id, 'failed');
+          } catch (queueError) {
+            console.error(`[Chat] Failed to push error events for session ${session.id}:`, queueError);
+          }
         } finally {
           // Always close the event queue when done
           session.eventQueue.close();
