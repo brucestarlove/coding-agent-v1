@@ -7,7 +7,8 @@
  * - Content blocks rendered in order (text and tool calls interleaved)
  */
 
-import type { Message, ContentBlock, ToolCall } from '../store/useAgentStore';
+import type { Message, ContentBlock } from '../store/useAgentStore';
+import { ToolCallView } from './ToolCallView';
 
 interface MessageBubbleProps {
   message: Message;
@@ -90,7 +91,7 @@ function ContentBlocksRenderer({
         if (block.type === 'tool_call') {
           return (
             <div key={block.toolCall.id} className="my-3">
-              <ToolCallBadge toolCall={block.toolCall} />
+              <ToolCallView toolCall={block.toolCall} />
             </div>
           );
         }
@@ -116,51 +117,6 @@ function ContentBlocksRenderer({
 function StreamingCursor() {
   return (
     <span className="inline-block w-2 h-4 ml-0.5 bg-violet-400 animate-pulse rounded-sm" />
-  );
-}
-
-/**
- * Basic tool call display badge.
- * Phase 5 will expand this into full ToolCallView component.
- */
-function ToolCallBadge({ toolCall }: { toolCall: ToolCall }) {
-  const statusColors = {
-    pending: 'bg-yellow-500/20 border-yellow-500/30 text-yellow-400',
-    completed: 'bg-emerald-500/20 border-emerald-500/30 text-emerald-400',
-    error: 'bg-pink-500/20 border-pink-500/30 text-pink-400',
-  };
-
-  const statusIcons = {
-    pending: '⏳',
-    completed: '✓',
-    error: '✗',
-  };
-
-  return (
-    <div
-      className={`
-        rounded-lg px-3 py-2 text-xs font-mono border
-        ${statusColors[toolCall.status]}
-      `}
-    >
-      <div className="flex items-center gap-2">
-        <span>{statusIcons[toolCall.status]}</span>
-        <span className="font-semibold">{toolCall.name}</span>
-      </div>
-      
-      {/* Show truncated input */}
-      {toolCall.input && Object.keys(toolCall.input).length > 0 && (
-        <div className="mt-1 text-white/50 truncate max-w-full">
-          {JSON.stringify(toolCall.input).slice(0, 60)}
-          {JSON.stringify(toolCall.input).length > 60 && '...'}
-        </div>
-      )}
-
-      {/* Show error if present */}
-      {toolCall.error && (
-        <div className="mt-1 text-pink-400 truncate">{toolCall.error}</div>
-      )}
-    </div>
   );
 }
 
