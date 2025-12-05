@@ -54,7 +54,7 @@ Build a **local-first AI coding assistant** that:
 |-----------|------------|---------|
 | **Runtime** | Node.js | Server execution environment |
 | **Framework** | Elysia + @elysiajs/node | HTTP routing, SSE streaming, type safety |
-| **LLM Client** | @anthropic-ai/sdk | Claude API integration |
+| **LLM Client** | openai (OpenRouter) | Claude API via OpenRouter |
 | **Streaming** | Server-Sent Events (SSE) | Real-time tool call updates |
 | **Validation** | TypeBox (via Elysia) | Request/response schema validation |
 
@@ -79,6 +79,7 @@ Build a **local-first AI coding assistant** that:
 | Tool | Purpose |
 |------|---------|
 | **tsx** | TypeScript execution with hot reload |
+| **tsup** | ESM bundler for production builds |
 | **TypeScript 5.x** | Type checking, strict mode |
 | **pnpm** | Package management |
 
@@ -111,15 +112,15 @@ Build a **local-first AI coding assistant** that:
 │  │ - POST /stop │  │ - Events     │  │ - write_file           │  │
 │  └──────────────┘  └──────────────┘  │ - list_dir             │  │
 │                           │          │ - run_shell            │  │
-│                    Claude API Client │                        │  │
+│                    LLM Client        │                        │  │
 │                           │          └────────────────────────┘  │
-│                    @anthropic-ai/sdk                             │
+│                    OpenRouter API (openai SDK)                   │
 └──────────────────────────────────────────────────────────────────┘
                                │
                                ▼
 ┌──────────────────────────────────────────────────────────────────┐
-│                    Anthropic Claude API                           │
-│                    (claude-sonnet-4-20250514)                          │
+│                    OpenRouter API                                 │
+│              (anthropic/claude-sonnet-4.5or other models)      │
 └──────────────────────────────────────────────────────────────────┘
 ```
 
@@ -199,7 +200,7 @@ The chat UI must:
 - [ ] Set up Elysia server with Node.js adapter
 - [ ] Set up React + Vite frontend
 - [ ] Configure Tailwind CSS
-- [ ] Create `.env` handling for `ANTHROPIC_API_KEY`
+- [ ] Create `.env` handling for `OPENROUTER_API_KEY`
 - [ ] Add development scripts (`dev`, `build`, `start`)
 
 #### Project Structure
@@ -309,13 +310,13 @@ export interface ToolCall {
 
 ---
 
-### Phase 2: Claude Integration
+### Phase 2: LLM Integration (OpenRouter)
 **Duration**: 3-4 hours  
-**Goal**: Implement Claude API client with streaming and tool handling
+**Goal**: Implement OpenRouter API client with streaming and tool handling
 
 #### Tasks
 
-- [ ] Set up Anthropic SDK client
+- [ ] Set up OpenRouter client (using openai SDK)
 - [ ] Create tool definitions for Claude API format
 - [ ] Implement streaming message handling
 - [ ] Parse `tool_use` content blocks
@@ -331,8 +332,8 @@ export async function* runAgentLoop(
   tools: ToolDefinition[]
 ): AsyncGenerator<StreamEvent> {
   while (true) {
-    // 1. Call Claude with messages and tools
-    const stream = await claude.messages.stream({...});
+    // 1. Call LLM with messages and tools (via OpenRouter)
+    const stream = await openai.chat.completions.create({ stream: true, ...});
     
     // 2. Yield streaming events
     for await (const event of stream) {
@@ -368,10 +369,10 @@ export async function* runAgentLoop(
 
 #### Success Criteria
 
-- [ ] Claude responds to simple prompts
+- [ ] LLM responds to simple prompts via OpenRouter
 - [ ] Text streams token by token
 - [ ] Tool calls are detected and parsed
-- [ ] Tool results are sent back to Claude
+- [ ] Tool results are sent back to LLM
 - [ ] Multi-turn tool conversations work
 
 ---
@@ -542,7 +543,7 @@ function ToolCallView({ toolCall }: { toolCall: ToolCall }) {
 
 - [ ] Workflow mode selector (chat, research, plan, implement)
 - [ ] System prompt customization
-- [ ] Model selector (claude-sonnet-4-20250514, opus, haiku)
+- [ ] Model selector (anthropic/claude-sonnet-4.5, openai/gpt-4o, etc.)
 - [ ] Working directory selector
 
 #### Reference Files
@@ -691,13 +692,13 @@ export interface Session {
 
 ```bash
 # Required
-ANTHROPIC_API_KEY=sk-ant-...
+OPENROUTER_API_KEY=sk-or-v1-...
 
 # Optional
-PORT=3001                    # Server port (default: 3001)
-PROJECT_ROOT=/path/to/dir    # Sandbox root (default: cwd)
-MODEL=claude-sonnet-4-20250514     # Claude model (default: claude-sonnet-4-20250514)
-MAX_TOKENS=4096              # Max response tokens (default: 4096)
+PORT=3001                              # Server port (default: 3001)
+PROJECT_ROOT=/path/to/dir              # Sandbox root (default: cwd)
+OPENROUTER_MODEL=anthropic/claude-sonnet-4.5  # Model (default: anthropic/claude-sonnet-4.5)
+MAX_TOKENS=4096                        # Max response tokens (default: 4096)
 ```
 
 ---
@@ -715,8 +716,3 @@ MAX_TOKENS=4096              # Max response tokens (default: 4096)
 | Phase 6: Polish & Controls | 3-4 hours | 21-29 hours |
 
 **Total Estimated Time**: 21-29 hours (3-4 days of focused work)
-
----
-
-*Document generated for the HL-Challenge AI Coding Agent project.*
-

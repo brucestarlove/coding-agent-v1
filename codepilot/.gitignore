@@ -30,6 +30,3 @@ pnpm-debug.log*
 
 # Vite
 vite.config.ts.timestamp-*
-
-# pnpm
-.pnpm-store/
