@@ -5,7 +5,6 @@
 
 import { execFile } from 'child_process';
 import util from 'util';
-import path from 'path';
 import type { ToolDefinition, ToolContext } from '../types';
 import { resolvePath, toRelativePath } from './utils';
 
@@ -221,4 +220,3 @@ export const gitLogTool: ToolDefinition = {
     }
   },
 };
-

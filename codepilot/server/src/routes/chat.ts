@@ -6,7 +6,7 @@
  */
 
 import { Elysia, t } from 'elysia';
-import type { ChatCompletionMessageParam } from 'openai/resources/chat/completions';
+import type { ChatCompletionMessageParam, ChatCompletionMessageToolCall } from 'openai/resources/chat/completions';
 import {
   createSession,
   updateSessionStatus,
@@ -26,6 +26,49 @@ import { userMessage, assistantMessage, assistantToolCallMessage, toolResultMess
 import { resolveCommand, getSystemPrompt, type CommandId } from '../agent/commands';
 import { savePlan, extractTitleFromContent, detectPlanType } from '../plans';
 import type { ToolCall } from '../types';
+import type { CoreContentBlock, CoreMessage } from '../providers';
+
+/**
+ * Convert stored ChatCompletion messages into provider CoreMessage format.
+ * This keeps persistence compatible with the new provider abstraction.
+ */
+function toCoreMessages(messages: ChatCompletionMessageParam[]): CoreMessage[] {
+  return messages.map((msg): CoreMessage => {
+    // Assistant messages with tool calls become ordered blocks
+    if (msg.role === 'assistant' && Array.isArray(msg.tool_calls)) {
+      const blocks: CoreContentBlock[] = [];
+
+      if (typeof msg.content === 'string' && msg.content) {
+        blocks.push({ type: 'text', text: msg.content });
+      }
+
+      for (const tc of msg.tool_calls as ChatCompletionMessageToolCall[]) {
+        blocks.push({
+          type: 'tool_call',
+          id: tc.id,
+          name: tc.function.name,
+          arguments: tc.function.arguments || '',
+        });
+      }
+
+      return { role: 'assistant', content: blocks };
+    }
+
+    // Tool role: keep string content
+    if (msg.role === 'tool') {
+      return {
+        role: 'tool',
+        content: typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content),
+      };
+    }
+
+    // Default: preserve text content
+    return {
+      role: msg.role as CoreMessage['role'],
+      content: typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content ?? ''),
+    };
+  });
+}
 
 /**
  * Chat route plugin
@@ -124,7 +167,7 @@ export const chatRoutes = new Elysia({ prefix: '/api' })
       persistMessage(session.id, userMessage(message));
 
       // Get existing conversation history from database
-      const conversationHistory = getMessages(session.id);
+      const conversationHistory = toCoreMessages(getMessages(session.id));
 
       // Get system prompt for the command (inject plan if relevant)
       const systemPrompt = getSystemPrompt(resolvedCommand.id, currentPlan);
@@ -228,7 +271,7 @@ function spawnAgentLoopWithHistory(
   sessionId: string,
   userPrompt: string,
   workingDir: string,
-  conversationHistory: ChatCompletionMessageParam[],
+  conversationHistory: CoreMessage[],
   model?: string,
   systemPrompt?: string,
   commandId?: CommandId
@@ -255,7 +298,7 @@ function runAgentLoopWithPersistence(
   session: ReturnType<typeof getSession>,
   userPrompt: string,
   workingDir: string,
-  conversationHistory: ChatCompletionMessageParam[] | undefined,
+  conversationHistory: CoreMessage[] | undefined,
   model?: string,
   systemPrompt?: string,
   commandId?: CommandId
@@ -272,7 +315,6 @@ function runAgentLoopWithPersistence(
     try {
       for await (const event of runAgentLoop({
         userPrompt,
-        tools,
         workingDir,
         conversationHistory,
         signal: session.abortController.signal,
