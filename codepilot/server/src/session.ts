@@ -108,7 +108,7 @@ function generateSessionId(): string {
 
 /**
  * Create a new session
- * @param workingDir - Working directory for the session (defaults to parent of cwd)
+ * @param workingDir - Working directory for the session (defaults to PROJECT_ROOT env var if set, otherwise parent of cwd)
  */
 export function createSession(workingDir?: string): SessionState {
   const id = generateSessionId();

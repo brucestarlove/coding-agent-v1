@@ -3,12 +3,14 @@
  * These tools provide convenient wrappers around common git commands.
  */
 
-import { exec } from 'child_process';
+import { execFile } from 'child_process';
 import util from 'util';
 import type { ToolDefinition } from '../types';
 import { resolveSafePath, getProjectRoot } from './utils';
 
-const execAsync = util.promisify(exec);
+// Use execFile instead of exec to prevent shell injection attacks.
+// execFile runs the binary directly with an args array, no shell involved.
+const execFileAsync = util.promisify(execFile);
 
 /**
  * Show git diff for a file or the entire working directory.
@@ -64,10 +66,11 @@ export const gitDiffTool: ToolDefinition = {
       args.push('--', relativePath);
     }
 
+    // Build command string for display/debugging (not used for execution)
     const command = `git ${args.join(' ')}`;
 
     try {
-      const { stdout, stderr } = await execAsync(command, {
+      const { stdout, stderr } = await execFileAsync('git', args, {
         cwd: projectRoot,
         timeout: 30000,
         maxBuffer: 1024 * 1024 * 5, // 5MB for large diffs
@@ -129,10 +132,11 @@ export const gitStatusTool: ToolDefinition = {
       args.push('--short');
     }
 
+    // Build command string for display/debugging (not used for execution)
     const command = `git ${args.join(' ')}`;
 
     try {
-      const { stdout, stderr } = await execAsync(command, {
+      const { stdout, stderr } = await execFileAsync('git', args, {
         cwd: projectRoot,
         timeout: 10000,
       });
@@ -192,10 +196,11 @@ export const gitLogTool: ToolDefinition = {
       args.push('--', relativePath);
     }
 
+    // Build command string for display/debugging (not used for execution)
     const command = `git ${args.join(' ')}`;
 
     try {
-      const { stdout, stderr } = await execAsync(command, {
+      const { stdout, stderr } = await execFileAsync('git', args, {
         cwd: projectRoot,
         timeout: 10000,
       });

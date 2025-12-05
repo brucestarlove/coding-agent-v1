@@ -148,26 +148,50 @@ export const editFileTool: ToolDefinition = {
     const absolutePath = resolveSafePath(filePath);
 
     // Read original content
-    const oldContent = await fs.readFile(absolutePath, 'utf8');
-    let newContent = oldContent;
+    const originalContent = await fs.readFile(absolutePath, 'utf8');
+    let newContent = originalContent;
 
-    // Track which edits were applied
-    const appliedEdits: Array<{ old_text: string; new_text: string; applied: boolean }> = [];
+    // Track which edits were applied with replacement counts
+    const appliedEdits: Array<{
+      old_text: string;
+      new_text: string;
+      applied: boolean;
+      replacements: number;
+      warning?: string;
+    }> = [];
 
-    // Apply each edit in order
+    // Apply each edit - match against ORIGINAL content, not accumulating newContent
     for (const edit of edits) {
-      const wasFound = newContent.includes(edit.old_text);
-      if (wasFound) {
-        newContent = newContent.replace(edit.old_text, edit.new_text);
+      // Check if pattern exists in ORIGINAL content (not affected by previous edits)
+      const existsInOriginal = originalContent.includes(edit.old_text);
+
+      // Count occurrences using split (split produces N+1 parts for N occurrences)
+      const occurrenceCount = newContent.split(edit.old_text).length - 1;
+      const wasApplied = occurrenceCount > 0;
+
+      if (wasApplied) {
+        // Global replace using split/join (Node 14 compatible, avoids replaceAll)
+        newContent = newContent.split(edit.old_text).join(edit.new_text);
       }
+
+      // Build warning message if needed
+      let warning: string | undefined;
+      if (occurrenceCount > 1) {
+        warning = `Multiple occurrences (${occurrenceCount}) were replaced`;
+      } else if (!existsInOriginal && wasApplied) {
+        warning = 'Pattern was created by a previous edit';
+      }
+
       appliedEdits.push({
         old_text: edit.old_text,
         new_text: edit.new_text,
-        applied: wasFound,
+        applied: existsInOriginal, // Report based on original content
+        replacements: occurrenceCount,
+        warning,
       });
     }
 
-    // Check if any edits failed to find their target
+    // Check if any edits failed to find their target in the original content
     const failedEdits = appliedEdits.filter((e) => !e.applied);
     if (failedEdits.length > 0) {
       const failedTexts = failedEdits
@@ -182,11 +206,20 @@ export const editFileTool: ToolDefinition = {
     // Write the modified content
     await fs.writeFile(absolutePath, newContent, 'utf8');
 
+    // Calculate total replacements made
+    const totalReplacements = appliedEdits.reduce((sum, e) => sum + e.replacements, 0);
+
     return {
       path: filePath,
-      oldContent,
+      oldContent: originalContent,
       newContent,
       editsApplied: appliedEdits.length,
+      totalReplacements,
+      editDetails: appliedEdits.map((e) => ({
+        applied: e.applied,
+        replacements: e.replacements,
+        ...(e.warning && { warning: e.warning }),
+      })),
       success: true,
     };
   },
