@@ -30,3 +30,7 @@ pnpm-debug.log*
 
 # Vite
 vite.config.ts.timestamp-*
+
+# SQLite database
+data/
+*.db
