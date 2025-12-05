@@ -2,6 +2,21 @@
 
 AI-powered coding assistant with Elysia backend and React frontend.
 
+## Capabilities
+
+- Local-first: everything runs on your machine (server + UI).
+- Streaming-native: text, tool calls, and tool results stream live.
+- TypeScript end-to-end: shared types across backend and frontend.
+- Tool safety: sandboxed file access and guarded shell execution.
+
+## Workflows (modalities)
+
+- Chat: fast Q&A or lightweight guidance.
+- Research Codebase: read files, list directories, and run safe shell commands to gather context.
+- Create Plan: summarize requirements and propose ordered steps for a task.
+- Implement Plan — simple: apply straightforward single-file changes.
+- Implement Plan — complex: multi-file changes with checkpoints; emphasize diffs and verification.
+
 ## Repository Structure
 
 ```
@@ -115,6 +130,22 @@ pnpm --filter client build
 - **Zustand** - State management
 - **TypeScript** - Type safety
 
+## Tools
+
+### Current (implemented)
+- `read_file` — Read file contents (sandboxed to project root).
+- `write_file` — Create/overwrite files.
+- `list_dir` — List directory entries with types.
+- `run_shell` — Execute shell commands with safety checks.
+
+### Deferred / planned
+- `edit_file` — Targeted edits with diff return.
+- Search tools — `grep`/regex search and glob/find files.
+- Git tools — status, diff, log, commit helpers.
+- File management — delete, move/rename, mkdir.
+- Web/research — web search and URL fetch.
+- Code intelligence — find definition, references, diagnostics.
+
 ## Phase 0 Complete ✓
 
 - [x] Monorepo setup with pnpm workspaces
@@ -125,10 +156,22 @@ pnpm --filter client build
 - [x] Health check endpoint
 - [x] Placeholder directory structure
 
+## Phase Status
+
+- [x] Phase 0: Project setup
+- [x] Phase 1: Core tools
+- [x] Phase 2: LLM integration (OpenRouter)
+- [x] Phase 3: SSE streaming API
+- [x] Phase 4: Basic chat UI
+- [x] Phase 5: Tool call UI
+- [x] Phase 6: Session controls & polish
+- [x] Phase 6.5: SQLite persistence layer
+- [ ] Phase 7: Production hardening
+- [ ] Phase 8: Layout system (columns/rows)
+- [ ] Phase 8.5: Split-pane agent chats
+
 ## Next Steps
 
-- **Phase 1**: Implement core tools (FileSystem, Terminal, CodeSearch)
-- **Phase 2**: Build agent loop with Claude integration
-- **Phase 3**: Create API routes and SSE streaming
-- **Phase 4**: Develop frontend UI components
-- **Phase 5**: Complete integration and testing
+- **Phase 7**: Production hardening (retries, context mgmt, security, observability)
+- **Phase 8**: Layout system (row/column primitives, responsive grid, app shell)
+- **Phase 8.5**: Split-pane agent chats (multi-session side-by-side)
