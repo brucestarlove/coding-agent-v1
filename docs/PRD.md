@@ -523,6 +523,155 @@ function ToolCallView({ toolCall }: { toolCall: ToolCall }) {
 - [ ] Long outputs are truncated with expand option
 - [ ] Error states are clearly visible
 
+### Phase 5.5: Extra Tools
+
+## Current Tools
+
+Your agent currently has 4 tools:
+1. **`read_file`** - Read file contents
+2. **`write_file`** - Create/overwrite entire files
+3. **`list_dir`** - List directory contents
+4. **`run_shell`** - Execute shell commands
+
+## Recommended Additional Tools
+
+### 1. **`edit_file` (Code Diff Tool)** - Most Important!
+
+This is the big one you're asking about. Instead of overwriting entire files, this tool applies targeted edits:
+
+```typescript
+// Example tool definition
+export const editFileTool: ToolDefinition = {
+  name: 'edit_file',
+  description: 'Apply targeted edits to a file using search/replace blocks',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      path: { type: 'string', description: 'File path' },
+      edits: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: {
+            old_text: { type: 'string', description: 'Text to find' },
+            new_text: { type: 'string', description: 'Replacement text' },
+          },
+        },
+      },
+    },
+    required: ['path', 'edits'],
+  },
+  async handler(input) {
+    // Read file, apply edits, return diff
+    const oldContent = await fs.readFile(path, 'utf8');
+    let newContent = oldContent;
+    for (const edit of edits) {
+      newContent = newContent.replace(edit.old_text, edit.new_text);
+    }
+    await fs.writeFile(path, newContent);
+    return { 
+      path, 
+      oldContent,  // For diff view
+      newContent,
+      success: true 
+    };
+  },
+};
+```
+
+For the **UI diff view**, you'd add a new renderer in `ToolCallView.tsx` using a library like `diff` or `diff2html`:
+
+```bash
+pnpm add diff
+```
+
+```tsx
+// EditFileToolView component
+function EditFileToolView({ toolCall }) {
+  const { oldContent, newContent, path } = toolCall.result;
+  
+  // Generate unified diff
+  const diff = createPatch(path, oldContent, newContent);
+  
+  return (
+    <div>
+      <FilePath path={path} />
+      <DiffViewer diff={diff} /> {/* Syntax-highlighted diff */}
+    </div>
+  );
+}
+```
+
+---
+
+### 2. **Search Tools**
+
+| Tool | Purpose |
+|------|---------|
+| `grep` / `search_files` | Find text patterns across files (regex support) |
+| `find_files` / `glob` | Find files by name pattern |
+
+```typescript
+// grep tool
+{
+  name: 'grep',
+  input: { pattern: string, path?: string, regex?: boolean },
+  returns: [{ file: string, line: number, content: string }]
+}
+```
+
+---
+
+### 3. **Git Tools**
+
+| Tool | Purpose |
+|------|---------|
+| `git_status` | Show changed/staged files |
+| `git_diff` | Show uncommitted changes |
+| `git_commit` | Create commits |
+| `git_log` | View commit history |
+
+---
+
+### 4. **File Management**
+
+| Tool | Purpose |
+|------|---------|
+| `delete_file` | Remove files (with confirmation) |
+| `move_file` | Move/rename files |
+| `create_dir` | Create directories |
+
+---
+
+### 5. **Web/Research Tools**
+
+| Tool | Purpose |
+|------|---------|
+| `web_search` | Search the internet |
+| `fetch_url` | Read webpage content |
+
+---
+
+### 6. **Code Intelligence Tools**
+
+| Tool | Purpose |
+|------|---------|
+| `find_definition` | Jump to symbol definition (LSP) |
+| `find_references` | Find all references to symbol |
+| `get_diagnostics` | Get TypeScript/linting errors |
+
+---
+
+## My Recommendation: Start with `edit_file`
+
+The **`edit_file` tool with a diff viewer** is the highest-value addition because:
+
+1. **Safer edits** - Targeted changes vs. overwriting entire files
+2. **Better UX** - Users can see exactly what changed
+3. **Smaller context** - LLM sends only the edits, not full file content
+4. **Standard pattern** - This is what Cursor, Claude Code, and Aider all use
+
+
 ---
 
 ### Phase 6: Session Controls & Polish
@@ -709,6 +858,349 @@ function ToolCallView({ toolCall }: { toolCall: ToolCall }) {
 
 ---
 
+### Phase 8: Column + Row Layout System
+**Duration**: 4-6 hours  
+**Goal**: Build a flexible, composable layout system for complex UI arrangements
+
+#### Motivation
+
+As the application grows, users need more sophisticated layouts beyond a single chat column. This phase establishes the foundational layout primitives that enable:
+- Sidebar navigation and tool panels
+- Multi-column content arrangements
+- Responsive designs that adapt to screen size
+- Consistent spacing and alignment across the app
+
+#### Tasks
+
+- [ ] Create layout primitive components
+  - [ ] `<Row>` - Horizontal flex container with gap/align options
+  - [ ] `<Column>` - Vertical flex container with gap/justify options
+  - [ ] `<Container>` - Max-width wrapper with responsive padding
+  - [ ] `<Spacer>` - Flexible space filler (flex-grow)
+- [ ] Implement CSS Grid-based `<Grid>` component
+  - [ ] Support `cols` prop for column count
+  - [ ] Auto-responsive mode with `minChildWidth`
+  - [ ] Gap configuration (uniform or x/y)
+- [ ] Add responsive breakpoint utilities
+  - [ ] Define breakpoints: `sm` (640px), `md` (768px), `lg` (1024px), `xl` (1280px)
+  - [ ] Create `useBreakpoint()` hook for JS-based responsive logic
+  - [ ] Support responsive props (e.g., `cols={{ base: 1, md: 2, lg: 3 }}`)
+- [ ] Build app shell layout components
+  - [ ] `<AppShell>` - Main app wrapper with optional sidebar/header slots
+  - [ ] `<Sidebar>` - Collapsible side panel (left or right)
+  - [ ] `<MainContent>` - Scrollable main area with max-width constraint
+- [ ] Add layout debugging utilities
+  - [ ] Debug mode that shows layout boundaries
+  - [ ] Spacing visualization overlay
+
+#### Component Architecture
+
+```tsx
+// Layout primitives with typed props
+interface RowProps {
+  gap?: 'none' | 'xs' | 'sm' | 'md' | 'lg' | 'xl';
+  align?: 'start' | 'center' | 'end' | 'stretch' | 'baseline';
+  justify?: 'start' | 'center' | 'end' | 'between' | 'around';
+  wrap?: boolean;
+  children: React.ReactNode;
+}
+
+function Row({ gap = 'md', align = 'stretch', justify = 'start', wrap, children }: RowProps) {
+  return (
+    <div className={cn(
+      'flex',
+      gapClasses[gap],
+      alignClasses[align],
+      justifyClasses[justify],
+      wrap && 'flex-wrap'
+    )}>
+      {children}
+    </div>
+  );
+}
+
+// App shell with sidebar
+interface AppShellProps {
+  sidebar?: React.ReactNode;
+  sidebarWidth?: number;        // pixels, default 280
+  sidebarCollapsible?: boolean;
+  header?: React.ReactNode;
+  children: React.ReactNode;
+}
+
+function AppShell({ sidebar, sidebarWidth = 280, header, children }: AppShellProps) {
+  const [collapsed, setCollapsed] = useState(false);
+  
+  return (
+    <div className="h-screen flex flex-col">
+      {header && <header className="flex-none border-b">{header}</header>}
+      <div className="flex-1 flex overflow-hidden">
+        {sidebar && (
+          <aside 
+            className="flex-none border-r overflow-y-auto transition-all"
+            style={{ width: collapsed ? 0 : sidebarWidth }}
+          >
+            {sidebar}
+          </aside>
+        )}
+        <main className="flex-1 overflow-y-auto">{children}</main>
+      </div>
+    </div>
+  );
+}
+```
+
+#### Directory Structure
+
+```
+client/src/
+├── components/
+│   └── layout/
+│       ├── index.ts          # Barrel export
+│       ├── Row.tsx           # Horizontal flex
+│       ├── Column.tsx        # Vertical flex
+│       ├── Grid.tsx          # CSS Grid wrapper
+│       ├── Container.tsx     # Max-width container
+│       ├── Spacer.tsx        # Flex spacer
+│       ├── AppShell.tsx      # Main app layout
+│       ├── Sidebar.tsx       # Collapsible sidebar
+│       └── MainContent.tsx   # Scrollable content area
+├── hooks/
+│   └── useBreakpoint.ts      # Responsive hook
+└── styles/
+    └── layout.css            # Layout-specific utilities
+```
+
+#### Success Criteria
+
+- [ ] Layout components compose without CSS conflicts
+- [ ] Responsive breakpoints work consistently
+- [ ] Sidebar collapses/expands smoothly (300ms transition)
+- [ ] No horizontal overflow at any viewport size
+- [ ] Layout debug mode clearly shows component boundaries
+- [ ] App shell properly contains scrollable regions (no body scroll)
+
+---
+
+### Phase 8.5: Split Pane / Two-Column Agent Chats
+**Duration**: 8-10 hours  
+**Goal**: Enable side-by-side agent chat sessions for comparison, parallel work, and collaborative workflows
+
+#### Motivation
+
+Power users often want to:
+- Compare outputs from different prompts or models
+- Run parallel research tasks simultaneously
+- Keep a reference conversation while working on another
+- Test prompt variations side-by-side
+
+This phase builds on the layout system to enable multi-pane agent interactions.
+
+#### Tasks
+
+- [ ] Build resizable split pane component
+  - [ ] `<SplitPane>` with draggable divider
+  - [ ] Horizontal (side-by-side) and vertical (stacked) orientations
+  - [ ] Min/max constraints per pane
+  - [ ] Persist pane sizes to localStorage
+  - [ ] Double-click divider to reset to 50/50
+- [ ] Implement multi-session management
+  - [ ] Extend Zustand store to support multiple concurrent sessions
+  - [ ] Session registry with unique IDs per pane
+  - [ ] Independent message histories per session
+  - [ ] Shared vs isolated tool execution contexts
+- [ ] Create pane management UI
+  - [ ] "Split" button to create new pane
+  - [ ] "Close pane" button (with confirmation if session active)
+  - [ ] Pane focus indicator (subtle border highlight)
+  - [ ] Drag-and-drop to reorder panes
+- [ ] Add pane synchronization features (optional)
+  - [ ] "Mirror input" mode - type once, send to both
+  - [ ] "Compare mode" - highlight differences in responses
+  - [ ] Shared working directory toggle
+- [ ] Handle multiple SSE connections
+  - [ ] Connection pooling for concurrent streams
+  - [ ] Visual indicator showing which pane is streaming
+  - [ ] Graceful handling of connection limits
+- [ ] Keyboard navigation
+  - [ ] `Cmd/Ctrl + 1/2/3` to focus pane
+  - [ ] `Cmd/Ctrl + \` to toggle split
+  - [ ] `Cmd/Ctrl + W` to close focused pane
+
+#### Store Architecture
+
+```typescript
+// client/src/store/useMultiAgentStore.ts
+interface PaneState {
+  id: string;
+  sessionId: string | null;
+  messages: Message[];
+  events: StreamEvent[];
+  status: 'idle' | 'streaming' | 'error';
+  workingDir: string;
+  modelOverride?: string;  // Optional per-pane model
+}
+
+interface MultiAgentState {
+  panes: Record<string, PaneState>;
+  paneOrder: string[];           // Order for rendering
+  focusedPaneId: string | null;
+  layout: 'single' | 'horizontal' | 'vertical';
+  paneSizes: number[];           // Percentages
+  
+  // Actions
+  createPane: () => string;
+  closePane: (paneId: string) => void;
+  focusPane: (paneId: string) => void;
+  setPaneLayout: (layout: 'single' | 'horizontal' | 'vertical') => void;
+  resizePanes: (sizes: number[]) => void;
+  
+  // Per-pane actions
+  sendMessage: (paneId: string, text: string) => Promise<void>;
+  stopAgent: (paneId: string) => Promise<void>;
+  clearSession: (paneId: string) => void;
+}
+```
+
+#### Component Architecture
+
+```tsx
+// SplitPane with resizable divider
+interface SplitPaneProps {
+  orientation: 'horizontal' | 'vertical';
+  sizes: number[];              // Percentages [40, 60]
+  minSize?: number;             // Minimum pane size in pixels
+  onResize: (sizes: number[]) => void;
+  children: React.ReactNode[];  // Exactly 2 children for now
+}
+
+function SplitPane({ orientation, sizes, minSize = 200, onResize, children }: SplitPaneProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [dragging, setDragging] = useState(false);
+  
+  const handleMouseDown = () => setDragging(true);
+  
+  useEffect(() => {
+    if (!dragging) return;
+    
+    const handleMouseMove = (e: MouseEvent) => {
+      const container = containerRef.current;
+      if (!container) return;
+      
+      const rect = container.getBoundingClientRect();
+      const pos = orientation === 'horizontal' 
+        ? (e.clientX - rect.left) / rect.width
+        : (e.clientY - rect.top) / rect.height;
+      
+      const clamped = Math.max(0.2, Math.min(0.8, pos)); // 20-80% range
+      onResize([clamped * 100, (1 - clamped) * 100]);
+    };
+    
+    const handleMouseUp = () => setDragging(false);
+    
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [dragging, orientation, onResize]);
+  
+  return (
+    <div 
+      ref={containerRef}
+      className={cn('flex h-full', orientation === 'vertical' && 'flex-col')}
+    >
+      <div style={{ flexBasis: `${sizes[0]}%` }} className="overflow-hidden">
+        {children[0]}
+      </div>
+      
+      <div 
+        onMouseDown={handleMouseDown}
+        className={cn(
+          'flex-none bg-gray-200 hover:bg-blue-400 transition-colors',
+          orientation === 'horizontal' ? 'w-1 cursor-col-resize' : 'h-1 cursor-row-resize',
+          dragging && 'bg-blue-500'
+        )}
+      />
+      
+      <div style={{ flexBasis: `${sizes[1]}%` }} className="overflow-hidden">
+        {children[1]}
+      </div>
+    </div>
+  );
+}
+
+// Multi-pane chat container
+function MultiPaneChat() {
+  const { panes, paneOrder, layout, paneSizes, focusedPaneId, focusPane, resizePanes } = useMultiAgentStore();
+  
+  if (layout === 'single' || paneOrder.length === 1) {
+    const paneId = paneOrder[0];
+    return <ChatPane paneId={paneId} pane={panes[paneId]} focused />;
+  }
+  
+  return (
+    <SplitPane 
+      orientation={layout} 
+      sizes={paneSizes}
+      onResize={resizePanes}
+    >
+      {paneOrder.slice(0, 2).map(paneId => (
+        <ChatPane 
+          key={paneId}
+          paneId={paneId}
+          pane={panes[paneId]}
+          focused={paneId === focusedPaneId}
+          onFocus={() => focusPane(paneId)}
+        />
+      ))}
+    </SplitPane>
+  );
+}
+```
+
+#### Visual Design
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│  CodePilot                               [Single] [Split ▼]  [Settings] │
+├─────────────────────────────┬───┬───────────────────────────────────────┤
+│  Session 1                  │ ║ │  Session 2                            │
+│  ┌───────────────────────┐  │ ║ │  ┌───────────────────────────────┐   │
+│  │ User: Explain this    │  │ ║ │  │ User: Refactor this code      │   │
+│  │ code in utils.ts      │  │ ║ │  │ using functional patterns     │   │
+│  └───────────────────────┘  │ ║ │  └───────────────────────────────┘   │
+│  ┌───────────────────────┐  │ ║ │  ┌───────────────────────────────┐   │
+│  │ Assistant: This code  │  │ ║ │  │ Assistant: I'll convert the   │   │
+│  │ defines a helper...   │  │ ║ │  │ imperative loops to map/...   │   │
+│  │ ░░░░ streaming        │  │ ║ │  └───────────────────────────────┘   │
+│  └───────────────────────┘  │◀║▶│  ┌───────────────────────────────┐   │
+│                             │ ║ │  │ 🔧 write_file                 │   │
+│                             │ ║ │  │    utils.ts (refactored)      │   │
+│                             │ ║ │  └───────────────────────────────┘   │
+│  ┌───────────────────────┐  │ ║ │  ┌───────────────────────────────┐   │
+│  │ Type a message...     │  │ ║ │  │ Type a message...             │   │
+│  │                  [⏹]  │  │ ║ │  │                          [➤]  │   │
+│  └───────────────────────┘  │ ║ │  └───────────────────────────────┘   │
+├─────────────────────────────┴───┴───────────────────────────────────────┤
+│  Pane 1: streaming • Pane 2: idle          [+ New Pane] [Compare Mode]  │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+#### Success Criteria
+
+- [ ] Split pane divider is draggable with smooth resize
+- [ ] Each pane maintains independent session state
+- [ ] Multiple panes can stream simultaneously without interference
+- [ ] Pane sizes persist across page reloads
+- [ ] Keyboard shortcuts navigate between panes
+- [ ] Closing a pane with active session prompts confirmation
+- [ ] Mobile/narrow viewport gracefully degrades to tabbed view
+- [ ] No memory leaks when opening/closing many panes
+
+---
+
 ## Success Criteria (Overall)
 
 ### Functional Requirements
@@ -859,11 +1351,14 @@ MAX_TOKENS=4096                        # Max response tokens (default: 4096)
 | Phase 2: Claude Integration | 3-4 hours | 8-12 hours |
 | Phase 3: SSE Streaming API | 2-3 hours | 10-15 hours |
 | Phase 4: Basic Chat UI | 4-5 hours | 14-20 hours |
-| Phase 5: Tool Call UI | 4-5 hours | 24-33 hours |
-| Phase 6: Polish & Controls | 3-4 hours | 27-37 hours |
-| Phase 6.5: SQLite Persistence | 6-8 hours | 20-28 hours |
+| Phase 5: Tool Call UI | 4-5 hours | 18-25 hours |
+| Phase 6: Polish & Controls | 3-4 hours | 21-29 hours |
+| Phase 6.5: SQLite Persistence | 6-8 hours | 27-37 hours |
 | Phase 7: Production Hardening | 6-8 hours | 33-45 hours |
+| Phase 8: Column + Row Layouts | 4-6 hours | 37-51 hours |
+| Phase 8.5: Split Pane Agent Chats | 8-10 hours | 45-61 hours |
 
 **MVP (Phases 0-4)**: 14-20 hours (2-3 days of focused work)  
 **Full UI (Phases 4-6)**: 27-37 hours (4-5 days of focused work)  
-**Production-Ready (Phases 6-7)**: 33-45 hours (5-6 days of focused work)
+**Production-Ready (Phases 6-7)**: 33-45 hours (5-6 days of focused work)  
+**Advanced UI (Phases 8-8.5)**: 45-61 hours (6-8 days of focused work)

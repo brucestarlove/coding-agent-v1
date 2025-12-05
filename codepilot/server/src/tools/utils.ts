@@ -5,11 +5,12 @@
 import path from 'path';
 
 /**
- * Get the project root directory from environment or current working directory.
+ * Get the project root directory from environment or one level up from cwd.
+ * When running from /codepilot/server, this returns /codepilot.
  * This is the sandbox boundary for all file operations.
  */
 export function getProjectRoot(): string {
-  return process.env.PROJECT_ROOT || process.cwd();
+  return process.env.PROJECT_ROOT || path.resolve(process.cwd(), '..');
 }
 
 /**
