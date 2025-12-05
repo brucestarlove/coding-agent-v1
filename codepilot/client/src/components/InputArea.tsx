@@ -62,14 +62,11 @@ export function InputArea() {
    * Handle keyboard shortcuts
    * - Enter: Send message
    * - Shift+Enter: New line
-   * - Escape: Stop agent (if streaming)
    */
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSubmit();
-    } else if (e.key === 'Escape' && isStreaming) {
-      stopAgent();
     }
   };
 
@@ -173,15 +170,6 @@ export function InputArea() {
                     <kbd className="px-1.5 py-0.5 bg-white/10 rounded text-white/70">Shift+Enter</kbd>
                     <span className="ml-1 text-white/40">new line</span>
                   </span>
-                  {isStreaming && (
-                    <>
-                      <span className="text-white/20">·</span>
-                      <span>
-                        <kbd className="px-1.5 py-0.5 bg-white/10 rounded text-white/70">Esc</kbd>
-                        <span className="ml-1 text-white/40">stop</span>
-                      </span>
-                    </>
-                  )}
                 </div>
               </TooltipContent>
             )}

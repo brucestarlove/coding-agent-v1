@@ -3,7 +3,7 @@
  * Similar to SessionSheet but for plan files
  */
 
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { useAgentStore, type PlanSummary, type Plan } from '../store/useAgentStore';
 
 /**
