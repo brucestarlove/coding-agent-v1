@@ -17,10 +17,10 @@ if (result.error) {
   console.log(`✅ Loaded ${Object.keys(result.parsed).length} env vars from ${envPath}`);
 }
 
-import { Elysia, t } from 'elysia';
+import { Elysia } from 'elysia';
 import { node } from '@elysiajs/node';
-import { tools, getToolByName } from './tools/index';
-import { runAgentLoop } from './agent/index';
+import { tools } from './tools/index';
+import { chatRoutes, streamRoutes } from './routes/index';
 
 // Server port from environment or default
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3001;
@@ -41,63 +41,12 @@ const app = new Elysia({ adapter: node() })
     })),
   }))
 
-  // Test tool endpoint for development validation
-  .post(
-    '/api/test-tool',
-    async ({ body }) => {
-      const { name, input } = body;
-      const tool = getToolByName(name);
-
-      if (!tool) {
-        return { success: false, error: `Tool not found: ${name}` };
-      }
-
-      try {
-        const result = await tool.handler(input);
-        return { success: true, result };
-      } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : String(err);
-        return { success: false, error: message };
-      }
-    },
-    {
-      body: t.Object({
-        name: t.String(),
-        input: t.Record(t.String(), t.Any()),
-      }),
-    }
-  )
-
-  // Test agent endpoint for Phase 2 validation
-  // Runs the agent loop and collects all events (non-streaming for testing)
-  .post(
-    '/api/test-agent',
-    async ({ body }) => {
-      const { prompt } = body;
-      const events = [];
-
-      try {
-        // Run the agent loop and collect all events
-        for await (const event of runAgentLoop({
-          userPrompt: prompt,
-          tools,
-        })) {
-          events.push(event);
-        }
-        return { success: true, events };
-      } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : String(err);
-        return { success: false, error: message, events };
-      }
-    },
-    {
-      body: t.Object({
-        prompt: t.String(),
-      }),
-    }
-  )
+  // Register API routes
+  .use(chatRoutes)
+  .use(streamRoutes)
 
   .listen(PORT);
 
 console.log(`🚀 Server running at http://localhost:${PORT}`);
 console.log(`📦 ${tools.length} tools loaded: ${tools.map((tool) => tool.name).join(', ')}`);
+console.log(`📡 SSE streaming available at GET /api/stream/:id`);

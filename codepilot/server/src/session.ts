@@ -1,0 +1,188 @@
+/**
+ * Session Manager
+ * Handles in-memory session state for agent conversations
+ * Provides event queue pattern for streaming to SSE clients
+ */
+
+import type { ChatCompletionMessageParam } from 'openai/resources/chat/completions';
+import type { StreamEvent } from './types';
+
+/**
+ * Represents an active session's state
+ */
+export interface SessionState {
+  id: string;
+  status: 'idle' | 'running' | 'completed' | 'failed';
+  messages: ChatCompletionMessageParam[];
+  workingDir: string;
+  abortController: AbortController;
+  createdAt: Date;
+  /** Queue of events for SSE streaming */
+  eventQueue: EventQueue;
+}
+
+/**
+ * Simple async event queue for streaming events to SSE clients
+ * Implements async iterable pattern for use with for-await-of
+ */
+export class EventQueue {
+  private queue: StreamEvent[] = [];
+  private resolvers: Array<(value: IteratorResult<StreamEvent>) => void> = [];
+  private closed = false;
+
+  /**
+   * Push an event to the queue
+   * If there's a waiting consumer, resolve immediately
+   */
+  push(event: StreamEvent): void {
+    if (this.closed) return;
+
+    if (this.resolvers.length > 0) {
+      // Consumer is waiting, resolve immediately
+      const resolve = this.resolvers.shift()!;
+      resolve({ value: event, done: false });
+    } else {
+      // No consumer waiting, queue the event
+      this.queue.push(event);
+    }
+  }
+
+  /**
+   * Close the queue - signals end of stream
+   */
+  close(): void {
+    this.closed = true;
+    // Resolve any waiting consumers with done
+    for (const resolve of this.resolvers) {
+      resolve({ value: undefined as unknown as StreamEvent, done: true });
+    }
+    this.resolvers = [];
+  }
+
+  /**
+   * Check if queue is closed
+   */
+  isClosed(): boolean {
+    return this.closed;
+  }
+
+  /**
+   * Async iterator implementation
+   */
+  [Symbol.asyncIterator](): AsyncIterator<StreamEvent> {
+    return {
+      next: (): Promise<IteratorResult<StreamEvent>> => {
+        // If there are queued events, return immediately
+        if (this.queue.length > 0) {
+          const event = this.queue.shift()!;
+          return Promise.resolve({ value: event, done: false });
+        }
+
+        // If closed, we're done
+        if (this.closed) {
+          return Promise.resolve({ value: undefined as unknown as StreamEvent, done: true });
+        }
+
+        // Otherwise, wait for next event
+        return new Promise((resolve) => {
+          this.resolvers.push(resolve);
+        });
+      },
+    };
+  }
+}
+
+/**
+ * In-memory session store
+ */
+const sessions = new Map<string, SessionState>();
+
+/**
+ * Generate a unique session ID
+ */
+function generateSessionId(): string {
+  return `session_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+}
+
+/**
+ * Create a new session
+ * @param workingDir - Working directory for the session (defaults to cwd)
+ */
+export function createSession(workingDir?: string): SessionState {
+  const id = generateSessionId();
+  const session: SessionState = {
+    id,
+    status: 'idle',
+    messages: [],
+    workingDir: workingDir || process.cwd(),
+    abortController: new AbortController(),
+    createdAt: new Date(),
+    eventQueue: new EventQueue(),
+  };
+
+  sessions.set(id, session);
+  return session;
+}
+
+/**
+ * Get a session by ID
+ */
+export function getSession(id: string): SessionState | undefined {
+  return sessions.get(id);
+}
+
+/**
+ * Delete a session
+ */
+export function deleteSession(id: string): boolean {
+  const session = sessions.get(id);
+  if (session) {
+    // Abort if running
+    if (session.status === 'running') {
+      session.abortController.abort();
+    }
+    // Close the event queue
+    session.eventQueue.close();
+    sessions.delete(id);
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Update session status
+ */
+export function updateSessionStatus(
+  id: string,
+  status: SessionState['status']
+): void {
+  const session = sessions.get(id);
+  if (session) {
+    session.status = status;
+  }
+}
+
+/**
+ * Get all sessions (for debugging/admin)
+ */
+export function getAllSessions(): SessionState[] {
+  return Array.from(sessions.values());
+}
+
+/**
+ * Clear old sessions (cleanup utility)
+ * @param maxAgeMs - Maximum age in milliseconds (default: 1 hour)
+ */
+export function cleanupOldSessions(maxAgeMs: number = 60 * 60 * 1000): number {
+  const now = Date.now();
+  let cleaned = 0;
+
+  for (const [id, session] of sessions) {
+    if (now - session.createdAt.getTime() > maxAgeMs) {
+      deleteSession(id);
+      cleaned++;
+    }
+  }
+
+  return cleaned;
+}
