@@ -33,6 +33,8 @@ export interface AgentLoopConfig {
   conversationHistory?: ChatCompletionMessageParam[];
   /** Optional custom system prompt */
   systemPrompt?: string;
+  /** Optional abort signal for cancellation */
+  signal?: AbortSignal;
 }
 
 /**
@@ -46,7 +48,14 @@ export interface AgentLoopConfig {
  * 4. Repeats until no more tool calls or max rounds reached
  */
 export async function* runAgentLoop(config: AgentLoopConfig): AsyncGenerator<StreamEvent> {
-  const { userPrompt, tools, systemPrompt = CODING_AGENT_SYSTEM_PROMPT } = config;
+  const { userPrompt, tools, systemPrompt = CODING_AGENT_SYSTEM_PROMPT, signal } = config;
+
+  // Check if already aborted before starting
+  if (signal?.aborted) {
+    yield { type: 'error', error: 'Aborted before starting' };
+    yield { type: 'done' };
+    return;
+  }
 
   // Initialize LLM client
   const llm = createLLMClient();
@@ -71,6 +80,13 @@ export async function* runAgentLoop(config: AgentLoopConfig): AsyncGenerator<Str
   // Main agent loop - continues until no tool calls or max rounds
   while (roundCount < MAX_TOOL_ROUNDS) {
     roundCount++;
+
+    // Check for abort before each LLM call
+    if (signal?.aborted) {
+      yield { type: 'error', error: 'Aborted by user' };
+      yield { type: 'done' };
+      return;
+    }
 
     // Stream the LLM response
     const stream = await llm.streamChatWithTools(messages, toolDefs);
@@ -107,8 +123,11 @@ export async function* runAgentLoop(config: AgentLoopConfig): AsyncGenerator<Str
     // Get the final parsed tool calls
     const parsedToolCalls = toolCallAccumulator.getToolCalls();
 
-    // If no tool calls, we're done
+    // If no tool calls, we're done - add assistant response to messages for conversation continuity
     if (!toolCallAccumulator.hasToolCalls()) {
+      if (contentAccumulator) {
+        messages.push({ role: 'assistant', content: contentAccumulator });
+      }
       yield { type: 'done' };
       break;
     }
@@ -127,6 +146,13 @@ export async function* runAgentLoop(config: AgentLoopConfig): AsyncGenerator<Str
 
     // Execute each tool call and collect results
     for (const parsedTC of parsedToolCalls) {
+      // Check for abort before each tool execution
+      if (signal?.aborted) {
+        yield { type: 'error', error: 'Aborted by user' };
+        yield { type: 'done' };
+        return;
+      }
+
       // Parse arguments once to avoid redundant parsing
       const input = safeParseJSON(parsedTC.arguments);
 
