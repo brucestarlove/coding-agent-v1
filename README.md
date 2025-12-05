@@ -2,6 +2,26 @@
 
 AI-powered coding assistant with Elysia backend and React frontend.
 
+## My coding agents, process & methodology
+
+- Claude Opus 4.5 - research, complex debugging
+- Claude Opus/Sonnet - implementing Claude plans
+- GPT-5.1 Codex Max - implementing other things, code review (free in Cursor this week)
+- CodeRabbit - intelligent code reviews on every feature branch before merge
+- Grok Code Fast 1 & Haiku - small, well-defined tweaks & fixes
+
+0. Gather findings in Excalidraw within Obsidian. Main goal: build a theory, like Dex emphasizes and I independently concluded prior.
+1. NotebookLM deep research on topic of creating an AI coding agent with web interface
+2. CodeLayer Research Codebase on CodeLayer's implementation, steered toward understanding how to implement it with a TS backend
+3. ChatGPT 5.1 deep thinking on comparing Express, Fastify & Elysia. Decided Elysia because it's new to me, is super fast, great for SSE, nice DX.
+4. LeoAI (Qwen 14B) & ChatGPT 5.1 to consider how to custom implement Claude's beta Tool Search Tool & Programmatic Tool Calling with OpenRouter https://www.anthropic.com/engineering/advanced-tool-use
+5. Mix of tools to research how best to implement tool calling & workflow methods, preventing infinite loops, calculating token usage & context window, and much more. See `/docs` for a platter of information.
+6. My own design direction fed into Gemini 3 Pro & Nano Banana Pro for aesthetics.
+7. Mostly used Cursor for planning & implementation for familiarity for speed. Tight deadline. Did not do TDD like I wanted to. But used CodeRabbit to great success, I think. Added tests after, sitting as a PR atm.
+
+![obsidian-screenshot](./readme-ss-obsidian.png)
+
+
 ## Capabilities
 
 - Local-first: everything runs on your machine (server + UI).
