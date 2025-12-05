@@ -19,14 +19,18 @@ export interface ToolCall {
   error?: string;
 }
 
+/** Content block - either text or a tool call, preserving order */
+export type ContentBlock =
+  | { type: 'text'; text: string }
+  | { type: 'tool_call'; toolCall: ToolCall };
+
 /** A message in the conversation */
 export interface Message {
   id: string;
   role: 'user' | 'assistant';
-  content: string;
+  /** For user messages: plain string. For assistant: ordered content blocks */
+  content: string | ContentBlock[];
   timestamp: Date;
-  /** Tool calls associated with this message (for assistant messages) */
-  toolCalls?: ToolCall[];
 }
 
 /** Agent status states */
@@ -44,10 +48,12 @@ interface AgentState {
 
   // Message state
   messages: Message[];
-  /** Accumulates streaming text from assistant */
-  currentText: string;
-  /** Tool calls for the current assistant response */
-  currentToolCalls: ToolCall[];
+  /** 
+   * Streaming content blocks - preserves order of text and tool calls.
+   * Text deltas are appended to the last text block, or a new text block is created.
+   * Tool calls create new tool_call blocks.
+   */
+  currentContent: ContentBlock[];
 
   // Actions
   sendMessage: (text: string) => Promise<void>;
@@ -78,8 +84,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   status: 'idle',
   error: null,
   messages: [],
-  currentText: '',
-  currentToolCalls: [],
+  currentContent: [],
 
   /**
    * Send a message to start a new conversation or continue existing one.
@@ -107,8 +112,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       messages: [...get().messages, userMessage],
       status: 'streaming',
       error: null,
-      currentText: '',
-      currentToolCalls: [],
+      currentContent: [],
     });
 
     try {
@@ -194,41 +198,63 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       status: 'idle',
       error: null,
       messages: [],
-      currentText: '',
-      currentToolCalls: [],
+      currentContent: [],
     });
   },
 
   /**
-   * Append streaming text delta to current response
+   * Append streaming text delta to current response.
+   * If the last content block is text, append to it. Otherwise, create a new text block.
    */
   appendText: (text: string) => {
-    set({ currentText: get().currentText + text });
+    const { currentContent } = get();
+    const lastBlock = currentContent[currentContent.length - 1];
+
+    if (lastBlock && lastBlock.type === 'text') {
+      // Append to existing text block
+      set({
+        currentContent: [
+          ...currentContent.slice(0, -1),
+          { type: 'text', text: lastBlock.text + text },
+        ],
+      });
+    } else {
+      // Create new text block
+      set({
+        currentContent: [...currentContent, { type: 'text', text }],
+      });
+    }
   },
 
   /**
-   * Add a new tool call (status: pending)
+   * Add a new tool call block (preserves order with text)
    */
   addToolCall: (toolCall: ToolCall) => {
     set({
-      currentToolCalls: [...get().currentToolCalls, toolCall],
+      currentContent: [
+        ...get().currentContent,
+        { type: 'tool_call', toolCall },
+      ],
     });
   },
 
   /**
-   * Update a tool call with its result
+   * Update a tool call with its result (finds it in content blocks)
    */
   updateToolResult: (id: string, result: unknown, error?: string) => {
     set({
-      currentToolCalls: get().currentToolCalls.map((tc) =>
-        tc.id === id
+      currentContent: get().currentContent.map((block) =>
+        block.type === 'tool_call' && block.toolCall.id === id
           ? {
-              ...tc,
-              status: error ? 'error' : 'completed',
-              result: error ? undefined : result,
-              error,
+              type: 'tool_call',
+              toolCall: {
+                ...block.toolCall,
+                status: error ? 'error' : 'completed',
+                result: error ? undefined : result,
+                error,
+              },
             }
-          : tc
+          : block
       ),
     });
   },
@@ -237,22 +263,20 @@ export const useAgentStore = create<AgentState>((set, get) => ({
    * Finalize the current streaming response into a complete message
    */
   finalizeResponse: () => {
-    const { currentText, currentToolCalls, messages } = get();
+    const { currentContent, messages } = get();
 
     // Only add message if there's content
-    if (currentText || currentToolCalls.length > 0) {
+    if (currentContent.length > 0) {
       const assistantMessage: Message = {
         id: crypto.randomUUID(),
         role: 'assistant',
-        content: currentText,
+        content: currentContent,
         timestamp: new Date(),
-        toolCalls: currentToolCalls.length > 0 ? currentToolCalls : undefined,
       };
 
       set({
         messages: [...messages, assistantMessage],
-        currentText: '',
-        currentToolCalls: [],
+        currentContent: [],
         status: 'idle',
       });
     } else {
@@ -272,4 +296,3 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     });
   },
 }));
-

@@ -4,7 +4,7 @@
  * Displays:
  * - Historical messages from store
  * - Currently streaming assistant response
- * - Tool calls inline (basic display)
+ * - Tool calls inline with text (preserving order)
  */
 
 import { useAgentStore, type Message } from '../store/useAgentStore';
@@ -16,28 +16,26 @@ import { MessageBubble } from './MessageBubble';
  */
 export function ChatStream() {
   const messages = useAgentStore((state) => state.messages);
-  const currentText = useAgentStore((state) => state.currentText);
-  const currentToolCalls = useAgentStore((state) => state.currentToolCalls);
+  const currentContent = useAgentStore((state) => state.currentContent);
   const status = useAgentStore((state) => state.status);
   const error = useAgentStore((state) => state.error);
 
   const isStreaming = status === 'streaming';
 
-  // Auto-scroll when messages or streaming text changes
+  // Auto-scroll when messages or streaming content changes
   const { containerRef } = useAutoScroll({
-    deps: [messages, currentText, currentToolCalls],
+    deps: [messages, currentContent],
     enabled: true,
   });
 
   // Create a temporary message for the streaming response
   const streamingMessage: Message | null =
-    isStreaming && (currentText || currentToolCalls.length > 0)
+    isStreaming && currentContent.length > 0
       ? {
           id: 'streaming',
           role: 'assistant',
-          content: currentText,
+          content: currentContent,
           timestamp: new Date(),
-          toolCalls: currentToolCalls.length > 0 ? currentToolCalls : undefined,
         }
       : null;
 
@@ -63,7 +61,7 @@ export function ChatStream() {
         )}
 
         {/* Loading indicator when waiting for first response */}
-        {isStreaming && !currentText && currentToolCalls.length === 0 && (
+        {isStreaming && currentContent.length === 0 && (
           <LoadingIndicator />
         )}
 
@@ -169,4 +167,3 @@ function ErrorDisplay({ error }: { error: string }) {
     </div>
   );
 }
-

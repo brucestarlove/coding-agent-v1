@@ -4,9 +4,10 @@
  * Starscape Design:
  * - User messages: Right-aligned, blue glass card
  * - Assistant messages: Left-aligned, purple aura with streaming cursor
+ * - Content blocks rendered in order (text and tool calls interleaved)
  */
 
-import type { Message, ToolCall } from '../store/useAgentStore';
+import type { Message, ContentBlock, ToolCall } from '../store/useAgentStore';
 
 interface MessageBubbleProps {
   message: Message;
@@ -22,8 +23,6 @@ export function MessageBubble({ message, isStreaming = false }: MessageBubblePro
 
   return (
     <div
-      role="article"
-      aria-label={`Message from ${isUser ? 'You' : 'CodePilot'}`}
       className={`flex ${isUser ? 'justify-end' : 'justify-start'} mb-4 animate-slide-up`}
     >
       <div
@@ -41,22 +40,18 @@ export function MessageBubble({ message, isStreaming = false }: MessageBubblePro
         </div>
 
         {/* Message content */}
-        <div 
-          className="text-white/90 text-sm leading-relaxed whitespace-pre-wrap break-words"
-          aria-live={isStreaming ? 'polite' : 'off'}
-        >
-          {message.content}
-          {isStreaming && <StreamingCursor />}
+        <div className="text-white/90 text-sm leading-relaxed">
+          {typeof message.content === 'string' ? (
+            // User message - plain string
+            <span className="whitespace-pre-wrap break-words">{message.content}</span>
+          ) : (
+            // Assistant message - ordered content blocks
+            <ContentBlocksRenderer 
+              blocks={message.content} 
+              isStreaming={isStreaming} 
+            />
+          )}
         </div>
-
-        {/* Tool calls (basic display for Phase 4, enhanced in Phase 5) */}
-        {message.toolCalls && message.toolCalls.length > 0 && (
-          <div className="mt-3 space-y-2">
-            {message.toolCalls.map((toolCall) => (
-              <ToolCallBadge key={toolCall.id} toolCall={toolCall} />
-            ))}
-          </div>
-        )}
 
         {/* Timestamp */}
         <div className="text-xs text-white/30 mt-2">
@@ -64,6 +59,54 @@ export function MessageBubble({ message, isStreaming = false }: MessageBubblePro
         </div>
       </div>
     </div>
+  );
+}
+
+/**
+ * Renders an array of content blocks in order (text and tool calls interleaved).
+ */
+function ContentBlocksRenderer({ 
+  blocks, 
+  isStreaming 
+}: { 
+  blocks: ContentBlock[]; 
+  isStreaming: boolean;
+}) {
+  return (
+    <>
+      {blocks.map((block, index) => {
+        const isLastBlock = index === blocks.length - 1;
+        
+        if (block.type === 'text') {
+          return (
+            <span key={index} className="whitespace-pre-wrap break-words">
+              {block.text}
+              {/* Show streaming cursor only on last text block while streaming */}
+              {isStreaming && isLastBlock && <StreamingCursor />}
+            </span>
+          );
+        }
+        
+        if (block.type === 'tool_call') {
+          return (
+            <div key={block.toolCall.id} className="my-3">
+              <ToolCallBadge toolCall={block.toolCall} />
+            </div>
+          );
+        }
+        
+        return null;
+      })}
+      
+      {/* If streaming and last block is a tool call, show cursor after it */}
+      {isStreaming && 
+       blocks.length > 0 && 
+       blocks[blocks.length - 1].type === 'tool_call' && (
+        <div className="mt-2">
+          <StreamingCursor />
+        </div>
+      )}
+    </>
   );
 }
 
@@ -101,9 +144,7 @@ function ToolCallBadge({ toolCall }: { toolCall: ToolCall }) {
       `}
     >
       <div className="flex items-center gap-2">
-        <span aria-label={`Status: ${toolCall.status}`} role="img">
-          {statusIcons[toolCall.status]}
-        </span>
+        <span>{statusIcons[toolCall.status]}</span>
         <span className="font-semibold">{toolCall.name}</span>
       </div>
       
@@ -133,4 +174,3 @@ function formatTime(date: Date): string {
     hour12: true,
   }).format(date);
 }
-
