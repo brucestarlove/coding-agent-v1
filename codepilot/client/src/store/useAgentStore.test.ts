@@ -221,15 +221,15 @@ describe('useAgentStore', () => {
       });
     });
 
-    describe('updateTokenUsage', () => {
-      it('should accumulate token usage', () => {
-        getStoreState().updateTokenUsage({
+    describe('updateApiUsage', () => {
+      it('should accumulate API token usage while preserving context fields', () => {
+        getStoreState().updateApiUsage({
           prompt_tokens: 100,
           completion_tokens: 50,
           total_tokens: 150,
         });
 
-        getStoreState().updateTokenUsage({
+        getStoreState().updateApiUsage({
           prompt_tokens: 80,
           completion_tokens: 40,
           total_tokens: 120,
@@ -237,9 +237,14 @@ describe('useAgentStore', () => {
 
         const { tokenUsage } = getStoreState();
         expect(tokenUsage).toEqual({
-          prompt: 180,
-          completion: 90,
-          total: 270,
+          contextTokens: 0,
+          contextAccurate: false,
+          contextSource: null,
+          totalPromptTokens: 180,
+          totalCompletionTokens: 90,
+          totalApiTokens: 270,
+          lastPromptTokens: 80,
+          lastCompletionTokens: 40,
         });
       });
     });

@@ -15,11 +15,11 @@ const execAsync = util.promisify(exec);
  * These patterns are checked before execution to prevent destructive operations.
  */
 export const BLOCKED_PATTERNS: RegExp[] = [
-  // Remove root or common system directories
-  /rm\s+(-[a-zA-Z]*\s+)*-[a-zA-Z]*r[a-zA-Z]*\s+(-[a-zA-Z]*\s+)*\/(?!\S)/,
-  /rm\s+(-[a-zA-Z]*\s+)*-[a-zA-Z]*r[a-zA-Z]*\s+(-[a-zA-Z]*\s+)*~\//,
-  /rm\s+-rf\s+\//,
-  /rm\s+-fr\s+\//,
+  // Remove root or common system directories (must target root explicitly)
+  /rm\s+(-[a-zA-Z]*\s+)*-[a-zA-Z]*r[a-zA-Z]*\s+(-[a-zA-Z]*\s+)*\/(?:\s|$)/,
+  /rm\s+(-[a-zA-Z]*\s+)*-[a-zA-Z]*r[a-zA-Z]*\s+(-[a-zA-Z]*\s+)*~\/(?:\s|$)/,
+  /rm\s+-rf\s+\/(?:\s|$)/,
+  /rm\s+-fr\s+\/(?:\s|$)/,
 
   // Fork bombs
   /:\(\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;?\s*:/,
