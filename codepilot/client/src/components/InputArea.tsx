@@ -399,12 +399,16 @@ function WorkingDirDisplay() {
 }
 
 /**
- * Token usage badge - shows context usage percentage with detailed hover tooltip.
+ * Token usage badge - shows context window usage with detailed hover tooltip.
+ * 
+ * Displays two key metrics:
+ * - Context Window: Accurate pre-send token count (from tiktoken)
+ * - API Usage: Cumulative tokens used across all calls (for cost awareness)
  */
 function TokenUsageBadge({ usage, contextWindow }: { usage: TokenUsage; contextWindow: number }) {
   const [showTooltip, setShowTooltip] = useState(false);
   
-  // Format large numbers with K suffix
+  // Format large numbers with K/M suffix
   const formatTokens = (n: number): string => {
     if (n >= 1000000) {
       return `${(n / 1000000).toFixed(1)}M`;
@@ -415,16 +419,31 @@ function TokenUsageBadge({ usage, contextWindow }: { usage: TokenUsage; contextW
     return n.toLocaleString();
   };
 
-  // Calculate percentage of context window used
-  const percentage = Math.min((usage.total / contextWindow) * 100, 100);
-  const percentageDisplay = percentage < 1 ? '<1%' : `${percentage.toFixed(1)}%`;
+  // Calculate context window percentage (the metric that matters for limits)
+  const contextPercentage = Math.min((usage.contextTokens / contextWindow) * 100, 100);
+  const contextPercentageDisplay = usage.contextTokens === 0 
+    ? '—' 
+    : contextPercentage < 1 
+      ? '<1%' 
+      : `${contextPercentage.toFixed(0)}%`;
 
-  // Color based on usage
-  const getColor = () => {
-    if (percentage >= 90) return 'text-pink-400';
-    if (percentage >= 70) return 'text-amber-400';
+  // Color based on context window usage (this is what affects model behavior)
+  const getContextColor = () => {
+    if (contextPercentage >= 90) return 'text-pink-400';
+    if (contextPercentage >= 70) return 'text-amber-400';
+    if (contextPercentage >= 50) return 'text-yellow-400/70';
     return 'text-violet-400/70';
   };
+
+  // Progress bar width
+  const progressWidth = Math.min(contextPercentage, 100);
+  
+  // Source indicator
+  const sourceLabel = usage.contextSource === 'tiktoken' 
+    ? 'tiktoken' 
+    : usage.contextSource === 'heuristic' 
+      ? '~estimate' 
+      : '—';
 
   return (
     <div
@@ -432,16 +451,16 @@ function TokenUsageBadge({ usage, contextWindow }: { usage: TokenUsage; contextW
       onMouseEnter={() => setShowTooltip(true)}
       onMouseLeave={() => setShowTooltip(false)}
     >
-      {/* Main display - percentage */}
+      {/* Main display - context percentage with mini progress bar */}
       <div
         className={`
-          flex items-center gap-1.5 px-2 py-0.5 rounded
+          flex items-center gap-2 px-2 py-0.5 rounded
           cursor-default select-none
           text-white/40 hover:text-white/60
           transition-colors duration-150
         `}
       >
-        {/* Token icon */}
+        {/* Context window icon */}
         <svg
           width="10"
           height="10"
@@ -451,28 +470,42 @@ function TokenUsageBadge({ usage, contextWindow }: { usage: TokenUsage; contextW
           strokeWidth="2"
           strokeLinecap="round"
           strokeLinejoin="round"
-          className={getColor()}
+          className={getContextColor()}
         >
-          <circle cx="12" cy="12" r="10" />
-          <path d="M12 6v12" />
-          <path d="M6 12h12" />
+          <rect x="3" y="3" width="18" height="18" rx="2" />
+          <path d="M9 3v18" />
         </svg>
-        <span className={`font-mono tabular-nums text-[11px] ${getColor()}`}>
-          {percentageDisplay}
+        
+        {/* Mini progress bar */}
+        <div className="w-12 h-1.5 bg-white/10 rounded-full overflow-hidden">
+          <div 
+            className={`h-full rounded-full transition-all duration-300 ${
+              contextPercentage >= 90 ? 'bg-pink-400' :
+              contextPercentage >= 70 ? 'bg-amber-400' :
+              contextPercentage >= 50 ? 'bg-yellow-400' :
+              'bg-violet-400'
+            }`}
+            style={{ width: `${progressWidth}%` }}
+          />
+        </div>
+        
+        <span className={`font-mono tabular-nums text-[11px] ${getContextColor()}`}>
+          {contextPercentageDisplay}
         </span>
       </div>
 
-      {/* Tooltip with detailed info */}
+      {/* Tooltip with detailed breakdown */}
       {showTooltip && (
         <div
           className="
             absolute bottom-full left-1/2 -translate-x-1/2 mb-2
-            px-3 py-2 rounded-lg
-            bg-[hsl(222,84%,8%)] border border-white/10
+            px-3 py-2.5 rounded-lg
+            bg-[hsl(222,84%,6%)] border border-white/10
             shadow-xl shadow-black/50
             text-xs text-white/70
             whitespace-nowrap z-50
             animate-fade-in
+            min-w-[240px]
           "
         >
           {/* Arrow */}
@@ -481,22 +514,79 @@ function TokenUsageBadge({ usage, contextWindow }: { usage: TokenUsage; contextW
           </div>
           
           {/* Content */}
-          <div className="space-y-1">
-            <div className="flex justify-between gap-4">
-              <span className="text-white/50">Prompt:</span>
-              <span className="font-mono tabular-nums text-white/80">{formatTokens(usage.prompt)}</span>
+          <div className="space-y-2">
+            {/* Context Window Section */}
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-[10px] uppercase tracking-wider text-white/40">
+                  Context Window
+                </span>
+                <span className={`text-[9px] px-1.5 py-0.5 rounded ${
+                  usage.contextAccurate 
+                    ? 'bg-emerald-500/20 text-emerald-400' 
+                    : 'bg-amber-500/20 text-amber-400'
+                }`}>
+                  {sourceLabel}
+                </span>
+              </div>
+              <div className="flex justify-between items-center gap-4">
+                <span className="text-white/60">Current size:</span>
+                <span className={`font-mono tabular-nums font-medium ${getContextColor()}`}>
+                  {formatTokens(usage.contextTokens)} / {formatTokens(contextWindow)}
+                </span>
+              </div>
+              {/* Progress bar */}
+              <div className="mt-1.5 h-1.5 bg-white/10 rounded-full overflow-hidden">
+                <div 
+                  className={`h-full rounded-full transition-all duration-300 ${
+                    contextPercentage >= 90 ? 'bg-pink-400' :
+                    contextPercentage >= 70 ? 'bg-amber-400' :
+                    contextPercentage >= 50 ? 'bg-yellow-400' :
+                    'bg-violet-400'
+                  }`}
+                  style={{ width: `${progressWidth}%` }}
+                />
+              </div>
             </div>
-            <div className="flex justify-between gap-4">
-              <span className="text-white/50">Completion:</span>
-              <span className="font-mono tabular-nums text-white/80">{formatTokens(usage.completion)}</span>
+
+            <div className="border-t border-white/10" />
+
+            {/* API Usage Section (cumulative) */}
+            <div>
+              <div className="text-[10px] uppercase tracking-wider text-white/40 mb-1">
+                Session API Usage <span className="normal-case text-white/30">(for cost)</span>
+              </div>
+              <div className="space-y-0.5">
+                <div className="flex justify-between gap-4">
+                  <span className="text-white/50">Prompt tokens:</span>
+                  <span className="font-mono tabular-nums text-white/70">
+                    {formatTokens(usage.totalPromptTokens)}
+                  </span>
+                </div>
+                <div className="flex justify-between gap-4">
+                  <span className="text-white/50">Completion tokens:</span>
+                  <span className="font-mono tabular-nums text-white/70">
+                    {formatTokens(usage.totalCompletionTokens)}
+                  </span>
+                </div>
+                <div className="flex justify-between gap-4 pt-1 border-t border-white/5">
+                  <span className="text-white/50">Total API:</span>
+                  <span className="font-mono tabular-nums text-white/90 font-medium">
+                    {formatTokens(usage.totalApiTokens)}
+                  </span>
+                </div>
+              </div>
             </div>
-            <div className="border-t border-white/10 my-1.5" />
-            <div className="flex justify-between gap-4">
-              <span className="text-white/50">Total:</span>
-              <span className="font-mono tabular-nums text-white/90 font-medium">
-                {formatTokens(usage.total)} / {formatTokens(contextWindow)}
-              </span>
-            </div>
+
+            {/* Last call info */}
+            {usage.lastPromptTokens > 0 && (
+              <>
+                <div className="border-t border-white/10" />
+                <div className="text-[10px] text-white/30">
+                  Last API response: {formatTokens(usage.lastPromptTokens)} prompt → {formatTokens(usage.lastCompletionTokens)} completion
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}
@@ -645,7 +735,7 @@ function CommandSelector({
         onClick={() => !disabled && setIsOpen(!isOpen)}
         disabled={disabled}
         className="
-          flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs w-full
+          flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs w-28
           bg-violet-500/20 border border-violet-500/30
           text-violet-200 hover:text-white hover:bg-violet-500/30
           disabled:opacity-50 disabled:cursor-not-allowed
@@ -653,7 +743,7 @@ function CommandSelector({
         "
       >
         {selected && getCommandIcon(selected.id)}
-        <span className="font-medium flex-1 text-left">{selected?.name || 'Chat'}</span>
+        <span className="font-medium flex-1 truncate">{selected?.name || 'Chat'}</span>
         <svg
           width="10"
           height="10"
@@ -677,7 +767,7 @@ function CommandSelector({
             onClick={() => setIsOpen(false)} 
           />
           {/* Dropdown - opens ABOVE the button */}
-          <div className="absolute left-0 bottom-full mb-2 w-56 rounded-lg bg-[hsl(222,84%,6%)] border border-white/10 shadow-xl z-50 py-1 animate-fade-in">
+          <div className="absolute left-0 bottom-full mb-2 w-72 rounded-lg bg-[hsl(222,84%,6%)] border border-white/10 shadow-xl z-50 py-1 animate-fade-in">
             {commands.map((command) => (
               <button
                 key={command.id}
@@ -699,7 +789,7 @@ function CommandSelector({
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="text-sm font-medium">{command.name}</div>
-                  <div className="text-xs text-white/40 truncate">{command.description}</div>
+                  <div className="text-xs text-white/40">{command.description}</div>
                 </div>
                 {selectedCommand === command.id && (
                   <svg

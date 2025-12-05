@@ -24,6 +24,11 @@ import { chatRoutes, streamRoutes, plansRoutes } from './routes/index';
 import { getAvailableModels } from './llm-client';
 import { getDropdownCommands } from './agent/commands';
 
+// Re-export core modules for library usage
+export * from './core/tools';
+export * from './providers';
+export { runAgentLoop } from './agent';
+
 // Server port from environment or default
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3001;
 

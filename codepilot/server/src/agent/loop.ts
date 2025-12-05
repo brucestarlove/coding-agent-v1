@@ -1,26 +1,34 @@
 /**
- * Agent loop implementation
- * Handles the conversation loop with LLM, streaming responses, and tool execution
+ * Agent loop implementation using ProviderAdapter abstraction.
+ * Supports deferred tool loading where only meta-tools are initially available.
  */
 
-import type { ChatCompletionMessageParam } from 'openai/resources/chat/completions';
-import type { FunctionParameters } from 'openai/resources/shared';
-import type { ToolDefinition, StreamEvent, ToolCall, TokenUsage, ToolContext } from '../types';
-import { createLLMClient, type ToolDef } from '../llm-client';
-import { getToolByName } from '../tools/index';
-import { getDefaultWorkingDir } from '../tools/utils';
+import type { StreamEvent, ToolCall, TokenUsage, ToolContext } from '../types';
+import type { ProviderAdapter, ProviderStreamEvent, CoreMessage, CoreToolResultBlock } from '../providers';
+import { createOpenRouterAdapter } from '../providers';
 import {
-  CODING_AGENT_SYSTEM_PROMPT,
-  systemMessage,
-  userMessage,
-  assistantToolCallMessage,
-  toolResultMessage,
-  ToolCallAccumulator,
-  type ParsedToolCall,
-} from './messages';
+  globalRegistry,
+  registerAllTools,
+  executeInvocations,
+  formatToolResult,
+  type ToolInvocation,
+  type ToolExecutionContext,
+} from '../core/tools';
+import { getDefaultWorkingDir } from '../tools/utils';
+import { CODING_AGENT_SYSTEM_PROMPT } from './messages';
+import { countTokens } from '../providers/token-counter';
 
 // Maximum number of tool call rounds to prevent infinite loops
-const MAX_TOOL_ROUNDS = 20;
+const MAX_TOOL_ROUNDS = 100;
+
+// Ensure tools are registered
+let toolsRegistered = false;
+function ensureToolsRegistered(): void {
+  if (!toolsRegistered) {
+    registerAllTools();
+    toolsRegistered = true;
+  }
+}
 
 /**
  * Configuration for the agent loop
@@ -28,37 +36,78 @@ const MAX_TOOL_ROUNDS = 20;
 export interface AgentLoopConfig {
   /** Initial user message to process */
   userPrompt: string;
-  /** Available tools for the agent */
-  tools: ToolDefinition[];
   /** Working directory for tool operations (defaults to PROJECT_ROOT or parent of cwd) */
   workingDir?: string;
   /** Optional existing conversation history */
-  conversationHistory?: ChatCompletionMessageParam[];
+  conversationHistory?: CoreMessage[];
   /** Optional custom system prompt */
   systemPrompt?: string;
   /** Optional abort signal for cancellation */
   signal?: AbortSignal;
   /** Optional model override for this conversation */
   model?: string;
+  /** Optional pre-loaded tools (for session continuity) */
+  loadedTools?: Set<string>;
 }
 
 /**
- * Runs the agent loop as an async generator
- * Yields StreamEvents as the agent processes the request
+ * Create the initial system message.
+ */
+function createSystemMessage(systemPrompt: string): CoreMessage {
+  return {
+    role: 'system',
+    content: systemPrompt,
+  };
+}
+
+/**
+ * Create a user message.
+ */
+function createUserMessage(content: string): CoreMessage {
+  return {
+    role: 'user',
+    content,
+  };
+}
+
+/**
+ * Create tool result messages from execution results.
+ */
+function createToolResultMessages(
+  results: Array<{ id: string; name: string; value: unknown; isError: boolean }>
+): CoreMessage {
+  const blocks: CoreToolResultBlock[] = results.map((r) => ({
+    type: 'tool_result',
+    toolUseId: r.id,
+    content: formatToolResult({
+      id: r.id,
+      name: r.name,
+      value: r.value,
+      isError: r.isError,
+    }),
+    isError: r.isError,
+  }));
+
+  return {
+    role: 'user',
+    content: blocks,
+  };
+}
+
+/**
+ * Runs the agent loop as an async generator.
+ * Yields StreamEvents as the agent processes the request.
  *
- * The loop:
- * 1. Sends messages to the LLM with tool definitions
- * 2. Streams text deltas back to the caller
- * 3. When tool calls are detected, executes them and continues
- * 4. Repeats until no more tool calls or max rounds reached
+ * Key feature: Deferred tool loading
+ * - Only meta-tools (load_tools) are available initially
+ * - Agent must call load_tools({ category: "..." }) to load other tools
+ * - Loaded tools persist for the duration of the session
  */
 export async function* runAgentLoop(config: AgentLoopConfig): AsyncGenerator<StreamEvent> {
-  const { userPrompt, tools, systemPrompt = CODING_AGENT_SYSTEM_PROMPT, signal, model: modelOverride } = config;
-  
-  // Create tool context with working directory
-  const toolContext: ToolContext = {
-    workingDir: config.workingDir || getDefaultWorkingDir(),
-  };
+  const { userPrompt, systemPrompt = CODING_AGENT_SYSTEM_PROMPT, signal, model } = config;
+
+  // Ensure tools are registered with the global registry
+  ensureToolsRegistered();
 
   // Check if already aborted before starting
   if (signal?.aborted) {
@@ -67,41 +116,40 @@ export async function* runAgentLoop(config: AgentLoopConfig): AsyncGenerator<Str
     return;
   }
 
-  // Initialize LLM client
-  const llm = createLLMClient();
-
-  // Check if the client supports tool calling
-  if (!llm.capabilities.tools) {
-    yield {
-      type: 'error',
-      error: `LLM provider "${llm.provider}" does not support tool calling. Please use OpenRouter (set OPENROUTER_API_KEY).`,
-    };
+  // Create provider adapter
+  let adapter: ProviderAdapter;
+  try {
+    adapter = createOpenRouterAdapter();
+  } catch (err) {
+    yield { type: 'error', error: err instanceof Error ? err.message : 'Failed to create LLM adapter' };
     yield { type: 'done' };
     return;
   }
 
+  // Initialize tool context
+  const workingDir = config.workingDir || getDefaultWorkingDir();
+  
+  // Track loaded tools for this session (initially empty - only meta-tools available)
+  const loadedTools = config.loadedTools || new Set<string>();
+  
+  const toolContext: ToolExecutionContext = {
+    workingDir,
+    loadedTools,
+  };
+
   // Build initial messages array
-  // If conversationHistory is provided, check if it already has a system message
-  // If not, prepend the systemPrompt to ensure it's not silently dropped
-  let messages: ChatCompletionMessageParam[];
+  let messages: CoreMessage[];
   if (config.conversationHistory) {
     const hasSystemMessage = config.conversationHistory.some((msg) => msg.role === 'system');
     messages = hasSystemMessage
       ? [...config.conversationHistory]
-      : [systemMessage(systemPrompt), ...config.conversationHistory];
+      : [createSystemMessage(systemPrompt), ...config.conversationHistory];
   } else {
-    messages = [systemMessage(systemPrompt)];
+    messages = [createSystemMessage(systemPrompt)];
   }
 
   // Add the user's message
-  messages.push(userMessage(userPrompt));
-
-  // Tool definitions for the API (cast inputSchema to FunctionParameters for OpenAI compatibility)
-  const toolDefs: ToolDef[] = tools.map((t) => ({
-    name: t.name,
-    description: t.description,
-    inputSchema: t.inputSchema as FunctionParameters,
-  }));
+  messages.push(createUserMessage(userPrompt));
 
   let roundCount = 0;
   let completedNaturally = false;
@@ -117,119 +165,110 @@ export async function* runAgentLoop(config: AgentLoopConfig): AsyncGenerator<Str
       return;
     }
 
-    // Stream the LLM response
-    const stream = await llm.streamChatWithTools(messages, toolDefs, modelOverride);
+    // Count tokens BEFORE sending to get accurate context window estimate
+    // This is the correct way to track context - not the API's reported usage
+    const contextTokens = await countTokens(messages);
+    yield {
+      type: 'context',
+      context: {
+        contextTokens,
+        accurate: true,
+        source: 'tiktoken',
+      },
+    };
 
-    // Accumulate content and tool calls from the stream
-    let contentAccumulator = '';
-    const toolCallAccumulator = new ToolCallAccumulator();
-    let usageData: TokenUsage | null = null;
+    // Stream the provider turn
+    const turnGenerator = adapter.sendTurn({
+      messages,
+      registry: globalRegistry,
+      loadedTools,
+      model,
+      signal,
+    });
 
-    // Process streaming chunks
-    for await (const chunk of stream) {
-      // Capture usage data from the final chunk (when stream_options.include_usage is true)
-      if (chunk.usage) {
-        usageData = {
-          prompt_tokens: chunk.usage.prompt_tokens,
-          completion_tokens: chunk.usage.completion_tokens,
-          total_tokens: chunk.usage.total_tokens,
-        };
-      }
+    let toolInvocations: ToolInvocation[] = [];
+    let turnMessages: CoreMessage[] = [];
 
-      const choice = chunk.choices[0];
-      if (!choice) continue;
+    // Process stream events
+    for await (const event of turnGenerator) {
+      switch (event.type) {
+        case 'text_delta':
+          yield { type: 'text_delta', text: event.text };
+          break;
 
-      const delta = choice.delta;
+        case 'tool_call_start':
+          // Emit pending tool call
+          yield {
+            type: 'tool_call',
+            toolCall: {
+              id: event.id,
+              name: event.name,
+              input: {},
+              status: 'pending',
+            },
+          };
+          break;
 
-      // Handle text content delta
-      if (delta.content) {
-        contentAccumulator += delta.content;
-        yield { type: 'text_delta', text: delta.content };
-      }
+        case 'usage':
+          yield {
+            type: 'usage',
+            usage: {
+              prompt_tokens: event.usage.promptTokens,
+              completion_tokens: event.usage.completionTokens,
+              total_tokens: event.usage.totalTokens,
+            },
+          };
+          break;
 
-      // Handle tool call deltas (streamed incrementally)
-      if (delta.tool_calls) {
-        for (const tc of delta.tool_calls) {
-          toolCallAccumulator.addDelta({
-            index: tc.index,
-            id: tc.id,
-            function: tc.function,
-          });
-        }
+        case 'error':
+          yield { type: 'error', error: event.error };
+          break;
+
+        case 'turn_complete':
+          toolInvocations = event.result.toolInvocations;
+          turnMessages = event.result.messagesToAppend;
+
+          // If done with no tool calls, we're finished
+          if (event.result.done) {
+            messages.push(...turnMessages);
+            completedNaturally = true;
+          }
+          break;
       }
     }
 
-    // Emit usage event if we captured usage data
-    if (usageData) {
-      yield { type: 'usage', usage: usageData };
-    }
-
-    // Get the final parsed tool calls
-    const parsedToolCalls = toolCallAccumulator.getToolCalls();
-
-    // If no tool calls, we're done - add assistant response to messages for conversation continuity
-    if (!toolCallAccumulator.hasToolCalls()) {
-      if (contentAccumulator) {
-        messages.push({ role: 'assistant', content: contentAccumulator });
+    // If no tool calls, we're done
+    if (toolInvocations.length === 0) {
+      if (completedNaturally) {
+        yield { type: 'done' };
+        break;
       }
-      completedNaturally = true;
-      yield { type: 'done' };
-      break;
+      continue;
     }
 
     // Add assistant message with tool calls to history
-    messages.push(
-      assistantToolCallMessage(
-        parsedToolCalls.map((tc) => ({
-          id: tc.id,
-          name: tc.name,
-          arguments: tc.arguments,
-        })),
-        contentAccumulator || null
-      )
-    );
+    messages.push(...turnMessages);
 
-    // Execute each tool call and collect results
-    for (const parsedTC of parsedToolCalls) {
-      // Check for abort before each tool execution
-      if (signal?.aborted) {
-        yield { type: 'error', error: 'Aborted by user' };
-        yield { type: 'done' };
-        return;
-      }
+    // Execute tool calls
+    const toolResults = await executeInvocations(globalRegistry, toolInvocations, toolContext);
 
-      // Parse arguments once to avoid redundant parsing
-      const input = safeParseJSON(parsedTC.arguments);
-
-      // Yield pending tool call event
-      const pendingToolCall: ToolCall = {
-        id: parsedTC.id,
-        name: parsedTC.name,
-        input,
-        status: 'pending',
-      };
-      yield { type: 'tool_call', toolCall: pendingToolCall };
-
-      // Execute the tool with pre-parsed input and context
-      const result = await executeToolCall(parsedTC, input, toolContext);
-
-      // Create a new object for the result event (don't mutate the pending one)
-      const completedToolCall: ToolCall = {
-        id: parsedTC.id,
-        name: parsedTC.name,
-        input,
+    // Yield results for each tool call
+    for (const result of toolResults) {
+      const toolCall: ToolCall = {
+        id: result.id,
+        name: result.name,
+        input: toolInvocations.find((inv) => inv.id === result.id)?.input || {},
         status: result.isError ? 'error' : 'completed',
-        ...(result.isError ? { error: String(result.value) } : { result: result.value }),
+        ...(result.isError ? { error: String(result.error?.message || result.value) } : { result: result.value }),
       };
-
-      yield { type: 'tool_result', toolCall: completedToolCall };
-
-      // Add tool result to messages for next LLM call
-      messages.push(toolResultMessage(parsedTC.id, result.value, result.isError));
+      yield { type: 'tool_result', toolCall };
     }
+
+    // Add tool results to messages
+    messages.push(createToolResultMessages(toolResults));
   }
 
-  // If we hit max rounds without completing naturally, yield an error and done event
+  // If we hit max rounds without completing naturally
   if (roundCount >= MAX_TOOL_ROUNDS && !completedNaturally) {
     yield {
       type: 'error',
@@ -240,42 +279,10 @@ export async function* runAgentLoop(config: AgentLoopConfig): AsyncGenerator<Str
 }
 
 /**
- * Executes a single tool call by looking up the handler and running it
- * @param parsedTC - The parsed tool call from the LLM
- * @param input - Pre-parsed arguments to avoid redundant JSON parsing
- * @param context - Tool context with working directory and other session info
+ * Legacy compatibility: Get the list of available tools.
+ * @deprecated Use globalRegistry directly
  */
-async function executeToolCall(
-  parsedTC: ParsedToolCall,
-  input: Record<string, unknown>,
-  context: ToolContext
-): Promise<{ value: unknown; isError: boolean }> {
-  const tool = getToolByName(parsedTC.name);
-
-  if (!tool) {
-    return {
-      value: `Unknown tool: ${parsedTC.name}`,
-      isError: true,
-    };
-  }
-
-  try {
-    const result = await tool.handler(input, context);
-    return { value: result, isError: false };
-  } catch (err) {
-    const errorMessage = err instanceof Error ? err.message : String(err);
-    return { value: errorMessage, isError: true };
-  }
-}
-
-/**
- * Safely parses JSON, returning an empty object on failure
- */
-function safeParseJSON(jsonString: string): Record<string, unknown> {
-  try {
-    return JSON.parse(jsonString);
-  } catch {
-    console.error('Failed to parse tool arguments:', jsonString);
-    return {};
-  }
+export function getAvailableTools() {
+  ensureToolsRegistered();
+  return globalRegistry.list();
 }

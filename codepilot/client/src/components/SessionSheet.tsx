@@ -109,6 +109,7 @@ const EditableTitle = memo(function EditableTitle({
 
   return (
     <span
+      onClick={(e) => e.stopPropagation()}
       onDoubleClick={handleDoubleClick}
       className="truncate cursor-text hover:text-white/90"
       title="Double-click to edit"

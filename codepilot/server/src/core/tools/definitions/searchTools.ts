@@ -1,66 +1,35 @@
 /**
- * Search tools for finding files and text patterns.
- * Uses ripgrep when available for speed, falls back to pure Node.js.
+ * Search tools - grep and find files.
+ * Category: search
  */
 
 import { exec } from 'child_process';
 import util from 'util';
 import fs from 'fs/promises';
 import path from 'path';
-import type { ToolDefinition, ToolContext } from '../types';
-import { resolvePath, toRelativePath } from './utils';
+import type { ToolDefinition } from '../types';
+import { resolvePath, toRelativePath } from '../../../tools/utils';
 
 const execAsync = util.promisify(exec);
 
-// ============================================================================
-// Ripgrep Detection
-// ============================================================================
-
+// Ripgrep availability cache
 let ripgrepAvailable: boolean | null = null;
 
-/**
- * Check if ripgrep (rg) is installed and available.
- * Caches the result for subsequent calls.
- */
 async function isRipgrepAvailable(): Promise<boolean> {
-  if (ripgrepAvailable !== null) {
-    return ripgrepAvailable;
-  }
-
+  if (ripgrepAvailable !== null) return ripgrepAvailable;
   try {
     await execAsync('rg --version');
     ripgrepAvailable = true;
   } catch {
     ripgrepAvailable = false;
   }
-
   return ripgrepAvailable;
 }
 
-// ============================================================================
-// Default Ignore Patterns (used when no .gitignore)
-// ============================================================================
-
 const DEFAULT_IGNORE_PATTERNS = [
-  'node_modules',
-  '.pnpm-store',
-  '.pnpm_store',
-  '.git',
-  'dist',
-  'build',
-  '.next',
-  'coverage',
-  '.cache',
-  '*.min.js',
-  '*.map',
-  'package-lock.json',
-  'pnpm-lock.yaml',
-  'yarn.lock',
+  'node_modules', '.pnpm-store', '.pnpm_store', '.git', 'dist', 'build', '.next', 
+  'coverage', '.cache', '*.min.js', '*.map', 'package-lock.json', 'pnpm-lock.yaml', 'yarn.lock',
 ];
-
-// ============================================================================
-// Grep Tool - Search file contents
-// ============================================================================
 
 interface GrepMatch {
   file: string;
@@ -68,9 +37,6 @@ interface GrepMatch {
   content: string;
 }
 
-/**
- * Search for text patterns using ripgrep.
- */
 async function grepWithRipgrep(
   pattern: string,
   searchPath: string,
@@ -78,18 +44,10 @@ async function grepWithRipgrep(
 ): Promise<GrepMatch[]> {
   const { regex = false, caseSensitive = false, maxResults = 50 } = options;
 
-  // Build rg command with JSON output
   const args: string[] = ['--json', '--max-count', String(maxResults)];
+  if (!caseSensitive) args.push('--ignore-case');
+  if (!regex) args.push('--fixed-strings');
 
-  if (!caseSensitive) {
-    args.push('--ignore-case');
-  }
-
-  if (!regex) {
-    args.push('--fixed-strings');
-  }
-
-  // Escape pattern for shell (wrap in single quotes, escape existing quotes)
   const escapedPattern = pattern.replace(/'/g, "'\\''");
   args.push(`'${escapedPattern}'`);
   args.push(`'${searchPath}'`);
@@ -98,11 +56,10 @@ async function grepWithRipgrep(
 
   try {
     const { stdout } = await execAsync(command, {
-      maxBuffer: 10 * 1024 * 1024, // 10MB buffer for large results
+      maxBuffer: 10 * 1024 * 1024,
       timeout: 30000,
     });
 
-    // Parse JSON lines output from ripgrep
     const matches: GrepMatch[] = [];
     const lines = stdout.trim().split('\n').filter(Boolean);
 
@@ -123,106 +80,25 @@ async function grepWithRipgrep(
           }
         }
       } catch {
-        // Skip malformed JSON lines
+        // Skip malformed JSON
       }
-
-      // Respect maxResults limit
-      if (matches.length >= maxResults) {
-        break;
-      }
+      if (matches.length >= maxResults) break;
     }
 
     return matches;
   } catch (error: unknown) {
-    // rg exits with code 1 when no matches found - that's not an error
     const execError = error as { code?: number; stdout?: string };
-    if (execError.code === 1 && !execError.stdout) {
-      return [];
-    }
+    if (execError.code === 1 && !execError.stdout) return [];
     throw error;
   }
 }
 
-/**
- * Search for text patterns using pure Node.js (fallback).
- */
-async function grepWithNode(
-  pattern: string,
-  searchPath: string,
-  options: { regex?: boolean; caseSensitive?: boolean; maxResults?: number }
-): Promise<GrepMatch[]> {
-  const { regex = false, caseSensitive = false, maxResults = 50 } = options;
-
-  // Build regex from pattern
-  const flags = caseSensitive ? 'g' : 'gi';
-  const searchRegex = regex ? new RegExp(pattern, flags) : new RegExp(escapeRegex(pattern), flags);
-
-  const matches: GrepMatch[] = [];
-
-  // Recursively find and search files
-  async function searchDir(dirPath: string): Promise<void> {
-    if (matches.length >= maxResults) return;
-
-    const entries = await fs.readdir(dirPath, { withFileTypes: true });
-
-    for (const entry of entries) {
-      if (matches.length >= maxResults) break;
-
-      const fullPath = path.join(dirPath, entry.name);
-      const relativePath = toRelativePath(fullPath, searchPath);
-
-      // Skip ignored patterns
-      if (shouldIgnore(entry.name, relativePath)) {
-        continue;
-      }
-
-      if (entry.isDirectory()) {
-        await searchDir(fullPath);
-      } else if (entry.isFile()) {
-        await searchFile(fullPath, relativePath);
-      }
-    }
-  }
-
-  async function searchFile(filePath: string, relativePath: string): Promise<void> {
-    try {
-      // Skip binary files by checking extension
-      if (isBinaryExtension(filePath)) return;
-
-      const content = await fs.readFile(filePath, 'utf8');
-      const lines = content.split('\n');
-
-      for (let i = 0; i < lines.length && matches.length < maxResults; i++) {
-        if (searchRegex.test(lines[i])) {
-          matches.push({
-            file: relativePath,
-            line: i + 1,
-            content: lines[i],
-          });
-        }
-        // Reset regex lastIndex for global flag
-        searchRegex.lastIndex = 0;
-      }
-    } catch {
-      // Skip files that can't be read (binary, permissions, etc.)
-    }
-  }
-
-  await searchDir(searchPath);
-  return matches;
-}
-
-/**
- * Check if a path should be ignored based on default patterns.
- */
 function shouldIgnore(name: string, relativePath: string): boolean {
   for (const pattern of DEFAULT_IGNORE_PATTERNS) {
     if (pattern.startsWith('*')) {
-      // Glob pattern - check extension
       const ext = pattern.slice(1);
       if (name.endsWith(ext)) return true;
     } else {
-      // Directory/file name match
       if (name === pattern || relativePath.includes(`/${pattern}/`) || relativePath.startsWith(`${pattern}/`)) {
         return true;
       }
@@ -231,9 +107,6 @@ function shouldIgnore(name: string, relativePath: string): boolean {
   return false;
 }
 
-/**
- * Check if file has a binary extension.
- */
 function isBinaryExtension(filePath: string): boolean {
   const binaryExts = [
     '.png', '.jpg', '.jpeg', '.gif', '.webp', '.ico', '.svg',
@@ -248,11 +121,67 @@ function isBinaryExtension(filePath: string): boolean {
   return binaryExts.includes(ext);
 }
 
-/**
- * Escape special regex characters in a string.
- */
 function escapeRegex(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+async function grepWithNode(
+  pattern: string,
+  searchPath: string,
+  options: { regex?: boolean; caseSensitive?: boolean; maxResults?: number }
+): Promise<GrepMatch[]> {
+  const { regex = false, caseSensitive = false, maxResults = 50 } = options;
+
+  const flags = caseSensitive ? 'g' : 'gi';
+  const searchRegex = regex ? new RegExp(pattern, flags) : new RegExp(escapeRegex(pattern), flags);
+
+  const matches: GrepMatch[] = [];
+
+  async function searchDir(dirPath: string): Promise<void> {
+    if (matches.length >= maxResults) return;
+
+    const entries = await fs.readdir(dirPath, { withFileTypes: true });
+
+    for (const entry of entries) {
+      if (matches.length >= maxResults) break;
+
+      const fullPath = path.join(dirPath, entry.name);
+      const relativePath = toRelativePath(fullPath, searchPath);
+
+      if (shouldIgnore(entry.name, relativePath)) continue;
+
+      if (entry.isDirectory()) {
+        await searchDir(fullPath);
+      } else if (entry.isFile()) {
+        await searchFile(fullPath, relativePath);
+      }
+    }
+  }
+
+  async function searchFile(filePath: string, relativePath: string): Promise<void> {
+    try {
+      if (isBinaryExtension(filePath)) return;
+
+      const content = await fs.readFile(filePath, 'utf8');
+      const lines = content.split('\n');
+
+      for (let i = 0; i < lines.length && matches.length < maxResults; i++) {
+        if (searchRegex.test(lines[i])) {
+          matches.push({
+            file: relativePath,
+            line: i + 1,
+            content: lines[i],
+          });
+        }
+        searchRegex.lastIndex = 0;
+      }
+    } catch {
+      // Skip unreadable files
+    }
+  }
+
+  await searchDir(searchPath);
+  return matches;
 }
 
 /**
@@ -276,7 +205,7 @@ export const grepTool: ToolDefinition = {
       },
       regex: {
         type: 'boolean',
-        description: 'Treat pattern as regex (default: false, uses literal text matching)',
+        description: 'Treat pattern as regex (default: false)',
       },
       caseSensitive: {
         type: 'boolean',
@@ -289,7 +218,14 @@ export const grepTool: ToolDefinition = {
     },
     required: ['pattern'],
   },
-  async handler(input, context: ToolContext) {
+  metadata: {
+    category: 'search',
+    inputExamples: [
+      { pattern: 'TODO' },
+      { pattern: 'import.*React', regex: true },
+    ],
+  },
+  async handler(input, context) {
     const pattern = input.pattern as string;
     const searchPath = resolvePath((input.path as string) || '.', context.workingDir);
     const options = {
@@ -298,7 +234,6 @@ export const grepTool: ToolDefinition = {
       maxResults: (input.maxResults as number) || 50,
     };
 
-    // Use ripgrep if available, otherwise fall back to Node.js
     const useRipgrep = await isRipgrepAvailable();
     const matches = useRipgrep
       ? await grepWithRipgrep(pattern, searchPath, options)
@@ -315,28 +250,19 @@ export const grepTool: ToolDefinition = {
   },
 };
 
-// ============================================================================
-// Find Files Tool - Search by filename
-// ============================================================================
-
+// Find files implementation
 interface FileMatch {
   path: string;
   type: 'file' | 'dir';
   size?: number;
 }
 
-/**
- * Find files using ripgrep's --files mode with glob pattern.
- */
 async function findFilesWithRipgrep(
   pattern: string,
   searchPath: string,
   maxResults: number
 ): Promise<FileMatch[]> {
-  // Use rg --files with --glob for pattern matching
-  // Note: rg glob uses ** for recursive matching
   const globPattern = pattern.includes('*') ? pattern : `*${pattern}*`;
-
   const command = `rg --files --glob '${globPattern}' '${searchPath}' | head -n ${maxResults}`;
 
   try {
@@ -359,7 +285,6 @@ async function findFilesWithRipgrep(
           size: stat.isFile() ? stat.size : undefined,
         });
       } catch {
-        // File may have been deleted between listing and stat
         matches.push({
           path: toRelativePath(filePath, searchPath),
           type: 'file',
@@ -370,17 +295,11 @@ async function findFilesWithRipgrep(
     return matches;
   } catch (error: unknown) {
     const execError = error as { code?: number };
-    // rg exits with code 1 when no matches - not an error
-    if (execError.code === 1) {
-      return [];
-    }
+    if (execError.code === 1) return [];
     throw error;
   }
 }
 
-/**
- * Find files using pure Node.js (fallback).
- */
 async function findFilesWithNode(
   pattern: string,
   searchPath: string,
@@ -388,8 +307,6 @@ async function findFilesWithNode(
 ): Promise<FileMatch[]> {
   const matches: FileMatch[] = [];
 
-  // Convert glob pattern to regex
-  // Simple conversion: * -> .*, ? -> ., ** -> .*
   const regexPattern = pattern
     .replace(/\*\*/g, '<<<GLOBSTAR>>>')
     .replace(/\*/g, '[^/]*')
@@ -409,12 +326,8 @@ async function findFilesWithNode(
         const fullPath = path.join(dirPath, entry.name);
         const relativePath = toRelativePath(fullPath, searchPath);
 
-        // Skip ignored directories
-        if (entry.isDirectory() && shouldIgnore(entry.name, relativePath)) {
-          continue;
-        }
+        if (entry.isDirectory() && shouldIgnore(entry.name, relativePath)) continue;
 
-        // Test if path matches pattern
         if (regex.test(entry.name) || regex.test(relativePath)) {
           try {
             const stat = await fs.stat(fullPath);
@@ -431,13 +344,12 @@ async function findFilesWithNode(
           }
         }
 
-        // Recurse into directories
         if (entry.isDirectory() && !shouldIgnore(entry.name, relativePath)) {
           await searchDir(fullPath);
         }
       }
     } catch {
-      // Skip directories we can't read
+      // Skip unreadable directories
     }
   }
 
@@ -446,7 +358,7 @@ async function findFilesWithNode(
 }
 
 /**
- * Find files tool - Search for files by name pattern (glob).
+ * Find files tool - Search for files by name pattern.
  */
 export const findFilesTool: ToolDefinition = {
   name: 'find_files',
@@ -471,12 +383,18 @@ export const findFilesTool: ToolDefinition = {
     },
     required: ['pattern'],
   },
-  async handler(input, context: ToolContext) {
+  metadata: {
+    category: 'search',
+    inputExamples: [
+      { pattern: '*.ts' },
+      { pattern: '**/*.test.ts' },
+    ],
+  },
+  async handler(input, context) {
     const pattern = input.pattern as string;
     const searchPath = resolvePath((input.path as string) || '.', context.workingDir);
     const maxResults = (input.maxResults as number) || 100;
 
-    // Use ripgrep if available, otherwise fall back to Node.js
     const useRipgrep = await isRipgrepAvailable();
     const matches = useRipgrep
       ? await findFilesWithRipgrep(pattern, searchPath, maxResults)
@@ -492,4 +410,12 @@ export const findFilesTool: ToolDefinition = {
     };
   },
 };
+
+/**
+ * All search tools.
+ */
+export const searchTools: ToolDefinition[] = [
+  grepTool,
+  findFilesTool,
+];
 

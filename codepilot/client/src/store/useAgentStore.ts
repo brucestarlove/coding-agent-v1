@@ -36,11 +36,40 @@ export interface Message {
 /** Agent status states */
 export type AgentStatus = 'idle' | 'streaming' | 'error';
 
-/** Token usage tracking */
+/**
+ * Token usage tracking with both context window and cumulative API metrics.
+ * 
+ * Context metrics: PRE-SEND token counting (accurate context window size)
+ * API metrics: POST-RESPONSE usage data (for cost tracking)
+ * 
+ * IMPORTANT: contextTokens comes from our token counter BEFORE sending,
+ * while API metrics come from the provider's response AFTER completion.
+ */
 export interface TokenUsage {
-  prompt: number;
-  completion: number;
-  total: number;
+  // === Context Window Metrics (ACCURATE - from pre-send token counting) ===
+  /** 
+   * Current context window usage - counted BEFORE sending to API.
+   * This is the ACCURATE measure of how full the context window is.
+   */
+  contextTokens: number;
+  /** Whether the context count is accurate (true) or a heuristic estimate */
+  contextAccurate: boolean;
+  /** Source of context estimate: 'tiktoken' (accurate, local) or 'heuristic' (rough) */
+  contextSource: 'tiktoken' | 'heuristic' | null;
+  
+  // === Cumulative API Usage (for cost tracking - from API responses) ===
+  /** Total prompt tokens sent across ALL API calls in this session */
+  totalPromptTokens: number;
+  /** Total completion tokens generated across ALL API calls */
+  totalCompletionTokens: number;
+  /** Total tokens (prompt + completion) across ALL API calls */
+  totalApiTokens: number;
+  
+  // === Per-call info (from most recent API response) ===
+  /** Prompt tokens from the most recent API call */
+  lastPromptTokens: number;
+  /** Completion tokens from the most recent API call */
+  lastCompletionTokens: number;
 }
 
 /** Available model for selection */
@@ -173,7 +202,10 @@ interface AgentState {
   appendText: (text: string) => void;
   addToolCall: (toolCall: ToolCall) => void;
   updateToolResult: (id: string, result: unknown, error?: string) => void;
-  updateTokenUsage: (usage: { prompt_tokens: number; completion_tokens: number; total_tokens: number }) => void;
+  /** Update context window estimate (from pre-send token counting - ACCURATE) */
+  updateContextEstimate: (estimate: { contextTokens: number; accurate: boolean; source: 'tiktoken' | 'heuristic' }) => void;
+  /** Update API usage metrics (from API response - for cost tracking) */
+  updateApiUsage: (usage: { prompt_tokens: number; completion_tokens: number; total_tokens: number }) => void;
   finalizeResponse: () => void;
   setError: (error: string) => void;
 }
@@ -577,13 +609,27 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       }
 
       // Update store state
+      // Note: When loading from history, we only have totalTokens from DB
+      // We can't accurately reconstruct context vs API breakdown
+      // Context will be updated on next API call via pre-send token counting
       set({
         sessionId,
         sessionTitle: sessionData.title,
         workingDir: sessionData.workingDir,
         messages,
         currentContent: [],
-        tokenUsage: sessionData.totalTokens ? { prompt: 0, completion: 0, total: sessionData.totalTokens } : null,
+        tokenUsage: sessionData.totalTokens ? {
+          // For loaded sessions, context is unknown until next message
+          contextTokens: 0,
+          contextAccurate: false,
+          contextSource: null,
+          // Preserve cumulative totals from DB
+          totalPromptTokens: sessionData.totalTokens,
+          totalCompletionTokens: 0,
+          totalApiTokens: sessionData.totalTokens,
+          lastPromptTokens: 0,
+          lastCompletionTokens: 0,
+        } : null,
         status: 'idle',
         error: null,
         isSessionSheetOpen: false,
@@ -814,15 +860,49 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   },
 
   /**
-   * Update cumulative token usage (adds to existing totals)
+   * Update context window estimate from PRE-SEND token counting.
+   * This is the ACCURATE context size, not from API response.
    */
-  updateTokenUsage: (usage: { prompt_tokens: number; completion_tokens: number; total_tokens: number }) => {
+  updateContextEstimate: (estimate: { contextTokens: number; accurate: boolean; source: 'tiktoken' | 'heuristic' }) => {
     const { tokenUsage } = get();
     set({
       tokenUsage: {
-        prompt: (tokenUsage?.prompt || 0) + usage.prompt_tokens,
-        completion: (tokenUsage?.completion || 0) + usage.completion_tokens,
-        total: (tokenUsage?.total || 0) + usage.total_tokens,
+        // Update context window estimate (this is the accurate one!)
+        contextTokens: estimate.contextTokens,
+        contextAccurate: estimate.accurate,
+        contextSource: estimate.source,
+        
+        // Preserve cumulative API usage
+        totalPromptTokens: tokenUsage?.totalPromptTokens || 0,
+        totalCompletionTokens: tokenUsage?.totalCompletionTokens || 0,
+        totalApiTokens: tokenUsage?.totalApiTokens || 0,
+        lastPromptTokens: tokenUsage?.lastPromptTokens || 0,
+        lastCompletionTokens: tokenUsage?.lastCompletionTokens || 0,
+      },
+    });
+  },
+
+  /**
+   * Update API usage metrics from POST-RESPONSE data.
+   * Used for cost tracking, not context window estimation.
+   */
+  updateApiUsage: (usage: { prompt_tokens: number; completion_tokens: number; total_tokens: number }) => {
+    const { tokenUsage } = get();
+    set({
+      tokenUsage: {
+        // Preserve context estimate (the accurate one)
+        contextTokens: tokenUsage?.contextTokens || 0,
+        contextAccurate: tokenUsage?.contextAccurate || false,
+        contextSource: tokenUsage?.contextSource || null,
+        
+        // Update cumulative API usage (for cost tracking)
+        totalPromptTokens: (tokenUsage?.totalPromptTokens || 0) + usage.prompt_tokens,
+        totalCompletionTokens: (tokenUsage?.totalCompletionTokens || 0) + usage.completion_tokens,
+        totalApiTokens: (tokenUsage?.totalApiTokens || 0) + usage.total_tokens,
+        
+        // Per-call info from API
+        lastPromptTokens: usage.prompt_tokens,
+        lastCompletionTokens: usage.completion_tokens,
       },
     });
   },

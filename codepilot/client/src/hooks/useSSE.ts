@@ -6,20 +6,28 @@
 import { useEffect, useRef } from 'react';
 import { useAgentStore, type ToolCall } from '../store/useAgentStore';
 
-/** Token usage from server */
+/** Token usage from API response (for cost tracking) */
 interface TokenUsageEvent {
   prompt_tokens: number;
   completion_tokens: number;
   total_tokens: number;
 }
 
+/** Context estimate from pre-send token counting (accurate context window size) */
+interface ContextEstimateEvent {
+  contextTokens: number;
+  accurate: boolean;
+  source: 'tiktoken' | 'heuristic';
+}
+
 /** Stream event from server (matches server/src/types.ts StreamEvent) */
 interface StreamEvent {
-  type: 'text_delta' | 'tool_call' | 'tool_result' | 'error' | 'done' | 'usage';
+  type: 'text_delta' | 'tool_call' | 'tool_result' | 'error' | 'done' | 'usage' | 'context';
   text?: string;
   toolCall?: ToolCall;
   error?: string;
   usage?: TokenUsageEvent;
+  context?: ContextEstimateEvent;
 }
 
 const API_BASE = 'http://localhost:3001/api';
@@ -34,7 +42,8 @@ export function useSSE(): void {
   const appendText = useAgentStore((state) => state.appendText);
   const addToolCall = useAgentStore((state) => state.addToolCall);
   const updateToolResult = useAgentStore((state) => state.updateToolResult);
-  const updateTokenUsage = useAgentStore((state) => state.updateTokenUsage);
+  const updateContextEstimate = useAgentStore((state) => state.updateContextEstimate);
+  const updateApiUsage = useAgentStore((state) => state.updateApiUsage);
   const finalizeResponse = useAgentStore((state) => state.finalizeResponse);
   const setError = useAgentStore((state) => state.setError);
 
@@ -101,12 +110,24 @@ export function useSSE(): void {
       }
     });
 
-    // Handle usage events - token consumption tracking
+    // Handle context events - accurate context window estimate (from pre-send token counting)
+    eventSource.addEventListener('context', (event) => {
+      try {
+        const data: StreamEvent = JSON.parse(event.data);
+        if (data.context) {
+          updateContextEstimate(data.context);
+        }
+      } catch (err) {
+        console.error('[SSE] Failed to parse context:', err);
+      }
+    });
+
+    // Handle usage events - API-reported token usage (for cost tracking)
     eventSource.addEventListener('usage', (event) => {
       try {
         const data: StreamEvent = JSON.parse(event.data);
         if (data.usage) {
-          updateTokenUsage(data.usage);
+          updateApiUsage(data.usage);
         }
       } catch (err) {
         console.error('[SSE] Failed to parse usage:', err);
@@ -161,7 +182,8 @@ export function useSSE(): void {
     appendText,
     addToolCall,
     updateToolResult,
-    updateTokenUsage,
+    updateContextEstimate,
+    updateApiUsage,
     finalizeResponse,
     setError,
   ]);
