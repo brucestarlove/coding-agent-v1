@@ -384,10 +384,13 @@ function ListDirToolView({ toolCall }: { toolCall: ToolCall }) {
  * Fallback renderer for unknown tools.
  */
 function GenericToolView({ toolCall }: { toolCall: ToolCall }) {
+  const hasInput = Object.keys(toolCall.input).length > 0;
+  const hasResult = toolCall.result !== undefined && toolCall.result !== null;
+
   return (
     <div className="space-y-2">
       {/* Input JSON */}
-      {Object.keys(toolCall.input).length > 0 && (
+      {hasInput && (
         <div className="space-y-1">
           <div className="text-xs text-white/40">Input</div>
           <pre className="font-mono text-xs bg-black/30 rounded px-2 py-1.5 text-white/70 overflow-x-auto">
@@ -400,7 +403,7 @@ function GenericToolView({ toolCall }: { toolCall: ToolCall }) {
       {toolCall.error && <ErrorDisplay message={toolCall.error} />}
 
       {/* Result JSON */}
-      {toolCall.result && (
+      {hasResult && (
         <div className="space-y-1">
           <div className="text-xs text-white/40">Result</div>
           <pre className="font-mono text-xs bg-black/30 rounded px-2 py-1.5 text-white/70 overflow-x-auto">
