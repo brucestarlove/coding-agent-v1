@@ -167,6 +167,19 @@ export function updateSessionStatus(
 }
 
 /**
+ * Update session working directory
+ * @returns true if session was found and updated, false otherwise
+ */
+export function updateSessionWorkingDir(id: string, workingDir: string): boolean {
+  const session = sessions.get(id);
+  if (session) {
+    session.workingDir = workingDir;
+    return true;
+  }
+  return false;
+}
+
+/**
  * Safe read-only representation of a session for API responses
  * Excludes non-serializable fields (AbortController, EventQueue)
  */

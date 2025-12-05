@@ -4,7 +4,7 @@
  */
 
 import { Elysia, t } from 'elysia';
-import { createSession, updateSessionStatus } from '../session';
+import { createSession, updateSessionStatus, updateSessionWorkingDir, getSession } from '../session';
 import { runAgentLoop } from '../agent/index';
 import { tools } from '../tools/index';
 
@@ -21,7 +21,7 @@ export const chatRoutes = new Elysia({ prefix: '/api' })
   .post(
     '/chat',
     async ({ body }) => {
-      const { message, workingDir } = body;
+      const { message, workingDir, model } = body;
 
       // Create a new session
       const session = createSession(workingDir);
@@ -37,7 +37,9 @@ export const chatRoutes = new Elysia({ prefix: '/api' })
           for await (const event of runAgentLoop({
             userPrompt: message,
             tools,
+            workingDir: session.workingDir,
             signal: session.abortController.signal,
+            model,
           })) {
             // Push each event to the session's event queue
             session.eventQueue.push(event);
@@ -69,13 +71,50 @@ export const chatRoutes = new Elysia({ prefix: '/api' })
         }
       })();
 
-      // Return session ID immediately
-      return { sessionId: session.id };
+      // Return session ID and working directory
+      return { sessionId: session.id, workingDir: session.workingDir };
     },
     {
       body: t.Object({
         message: t.String({ minLength: 1 }),
         workingDir: t.Optional(t.String()),
+        model: t.Optional(t.String()),
+      }),
+    }
+  )
+  /**
+   * Update session working directory
+   * PATCH /api/session/:id/cwd
+   */
+  .patch(
+    '/session/:id/cwd',
+    async ({ params, body, set }) => {
+      const session = getSession(params.id);
+      
+      if (!session) {
+        set.status = 404;
+        return { error: 'Session not found' };
+      }
+      
+      const updated = updateSessionWorkingDir(params.id, body.workingDir);
+      
+      if (!updated) {
+        set.status = 500;
+        return { error: 'Failed to update working directory' };
+      }
+      
+      return { 
+        sessionId: params.id, 
+        workingDir: body.workingDir,
+        success: true 
+      };
+    },
+    {
+      params: t.Object({
+        id: t.String(),
+      }),
+      body: t.Object({
+        workingDir: t.String({ minLength: 1 }),
       }),
     }
   );

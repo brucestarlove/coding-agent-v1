@@ -5,8 +5,8 @@
 
 import { exec } from 'child_process';
 import util from 'util';
-import type { ToolDefinition } from '../types';
-import { resolveSafePath } from './utils';
+import type { ToolDefinition, ToolContext } from '../types';
+import { resolvePath } from './utils';
 
 const execAsync = util.promisify(exec);
 
@@ -88,7 +88,7 @@ export const runShellTool: ToolDefinition = {
     },
     required: ['command'],
   },
-  async handler(input) {
+  async handler(input, context: ToolContext) {
     const command = input.command as string;
     const cwdRelative = (input.cwd as string) || '.';
 
@@ -98,8 +98,8 @@ export const runShellTool: ToolDefinition = {
       throw new Error(`Dangerous command blocked: ${blockedReason}`);
     }
 
-    // Resolve working directory within sandbox
-    const cwdAbsolute = resolveSafePath(cwdRelative);
+    // Resolve working directory relative to session's workingDir
+    const cwdAbsolute = resolvePath(cwdRelative, context.workingDir);
 
     try {
       const { stdout, stderr } = await execAsync(command, {
@@ -110,7 +110,7 @@ export const runShellTool: ToolDefinition = {
 
       return {
         command,
-        cwd: cwdRelative,
+        cwd: cwdAbsolute,
         stdout,
         stderr,
         exitCode: 0,
@@ -126,7 +126,7 @@ export const runShellTool: ToolDefinition = {
 
       return {
         command,
-        cwd: cwdRelative,
+        cwd: cwdAbsolute,
         stdout: execError.stdout || '',
         stderr: execError.stderr || execError.message || 'Command failed',
         exitCode: execError.code || 1,

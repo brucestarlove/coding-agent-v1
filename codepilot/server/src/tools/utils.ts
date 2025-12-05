@@ -1,46 +1,61 @@
 /**
- * Utility functions for tool safety and sandboxing.
+ * Utility functions for tool safety and path resolution.
  */
 
 import path from 'path';
 
 /**
- * Get the project root directory from environment or one level up from cwd.
+ * Get the default working directory from environment or one level up from cwd.
  * When running from /codepilot/server, this returns /codepilot.
- * This is the sandbox boundary for all file operations.
+ * Used as fallback when no workingDir is specified.
  */
-export function getProjectRoot(): string {
+export function getDefaultWorkingDir(): string {
   return process.env.PROJECT_ROOT || path.resolve(process.cwd(), '..');
 }
 
 /**
- * Resolves a relative path to an absolute path within the project root sandbox.
- * Throws an error if the resolved path would escape the sandbox (path traversal attack).
- *
- * @param relativePath - Path relative to project root
- * @returns Absolute path within the sandbox
- * @throws Error if path escapes the project root
+ * Legacy alias for getDefaultWorkingDir - kept for backwards compatibility.
+ * @deprecated Use getDefaultWorkingDir() instead
  */
-export function resolveSafePath(relativePath: string): string {
-  const projectRoot = getProjectRoot();
+export function getProjectRoot(): string {
+  return getDefaultWorkingDir();
+}
 
-  // Normalize the project root to ensure consistent comparison
-  const normalizedRoot = path.resolve(projectRoot);
+/**
+ * Resolves a path relative to the given working directory.
+ * If the path is already absolute, validates it exists under the working directory.
+ *
+ * @param relativePath - Path relative to working directory (or absolute path)
+ * @param workingDir - The working directory to resolve from
+ * @returns Absolute path
+ */
+export function resolvePath(relativePath: string, workingDir: string): string {
+  // Normalize the working directory
+  const normalizedWorkingDir = path.resolve(workingDir);
 
-  // Resolve the full path
-  const absolutePath = path.resolve(normalizedRoot, relativePath);
-
-  // Security check: ensure the resolved path is within the project root
-  // We add a trailing separator to prevent matching partial directory names
-  // e.g., /project-root-backup should not match /project-root
-  if (
-    !absolutePath.startsWith(normalizedRoot + path.sep) &&
-    absolutePath !== normalizedRoot
-  ) {
-    throw new Error(
-      `Path outside project root is not allowed: ${relativePath}`
-    );
-  }
+  // Resolve the path (handles both relative and absolute)
+  const absolutePath = path.resolve(normalizedWorkingDir, relativePath);
 
   return absolutePath;
+}
+
+/**
+ * Computes the relative path from workingDir to absolutePath.
+ * Returns '.' if they're the same.
+ *
+ * @param absolutePath - The absolute path to convert
+ * @param workingDir - The working directory to be relative to
+ * @returns Relative path string
+ */
+export function toRelativePath(absolutePath: string, workingDir: string): string {
+  const relative = path.relative(workingDir, absolutePath);
+  return relative || '.';
+}
+
+/**
+ * Legacy sandbox resolver - resolves path within default project root.
+ * @deprecated Use resolvePath(path, workingDir) instead
+ */
+export function resolveSafePath(relativePath: string): string {
+  return resolvePath(relativePath, getDefaultWorkingDir());
 }

@@ -5,9 +5,10 @@
 
 import type { ChatCompletionMessageParam } from 'openai/resources/chat/completions';
 import type { FunctionParameters } from 'openai/resources/shared';
-import type { ToolDefinition, StreamEvent, ToolCall } from '../types';
+import type { ToolDefinition, StreamEvent, ToolCall, TokenUsage, ToolContext } from '../types';
 import { createLLMClient, type ToolDef } from '../llm-client';
 import { getToolByName } from '../tools/index';
+import { getDefaultWorkingDir } from '../tools/utils';
 import {
   CODING_AGENT_SYSTEM_PROMPT,
   systemMessage,
@@ -29,12 +30,16 @@ export interface AgentLoopConfig {
   userPrompt: string;
   /** Available tools for the agent */
   tools: ToolDefinition[];
+  /** Working directory for tool operations (defaults to PROJECT_ROOT or parent of cwd) */
+  workingDir?: string;
   /** Optional existing conversation history */
   conversationHistory?: ChatCompletionMessageParam[];
   /** Optional custom system prompt */
   systemPrompt?: string;
   /** Optional abort signal for cancellation */
   signal?: AbortSignal;
+  /** Optional model override for this conversation */
+  model?: string;
 }
 
 /**
@@ -48,7 +53,12 @@ export interface AgentLoopConfig {
  * 4. Repeats until no more tool calls or max rounds reached
  */
 export async function* runAgentLoop(config: AgentLoopConfig): AsyncGenerator<StreamEvent> {
-  const { userPrompt, tools, systemPrompt = CODING_AGENT_SYSTEM_PROMPT, signal } = config;
+  const { userPrompt, tools, systemPrompt = CODING_AGENT_SYSTEM_PROMPT, signal, model: modelOverride } = config;
+  
+  // Create tool context with working directory
+  const toolContext: ToolContext = {
+    workingDir: config.workingDir || getDefaultWorkingDir(),
+  };
 
   // Check if already aborted before starting
   if (signal?.aborted) {
@@ -108,14 +118,24 @@ export async function* runAgentLoop(config: AgentLoopConfig): AsyncGenerator<Str
     }
 
     // Stream the LLM response
-    const stream = await llm.streamChatWithTools(messages, toolDefs);
+    const stream = await llm.streamChatWithTools(messages, toolDefs, modelOverride);
 
     // Accumulate content and tool calls from the stream
     let contentAccumulator = '';
     const toolCallAccumulator = new ToolCallAccumulator();
+    let usageData: TokenUsage | null = null;
 
     // Process streaming chunks
     for await (const chunk of stream) {
+      // Capture usage data from the final chunk (when stream_options.include_usage is true)
+      if (chunk.usage) {
+        usageData = {
+          prompt_tokens: chunk.usage.prompt_tokens,
+          completion_tokens: chunk.usage.completion_tokens,
+          total_tokens: chunk.usage.total_tokens,
+        };
+      }
+
       const choice = chunk.choices[0];
       if (!choice) continue;
 
@@ -137,6 +157,11 @@ export async function* runAgentLoop(config: AgentLoopConfig): AsyncGenerator<Str
           });
         }
       }
+    }
+
+    // Emit usage event if we captured usage data
+    if (usageData) {
+      yield { type: 'usage', usage: usageData };
     }
 
     // Get the final parsed tool calls
@@ -185,8 +210,8 @@ export async function* runAgentLoop(config: AgentLoopConfig): AsyncGenerator<Str
       };
       yield { type: 'tool_call', toolCall: pendingToolCall };
 
-      // Execute the tool with pre-parsed input
-      const result = await executeToolCall(parsedTC, input);
+      // Execute the tool with pre-parsed input and context
+      const result = await executeToolCall(parsedTC, input, toolContext);
 
       // Create a new object for the result event (don't mutate the pending one)
       const completedToolCall: ToolCall = {
@@ -218,10 +243,12 @@ export async function* runAgentLoop(config: AgentLoopConfig): AsyncGenerator<Str
  * Executes a single tool call by looking up the handler and running it
  * @param parsedTC - The parsed tool call from the LLM
  * @param input - Pre-parsed arguments to avoid redundant JSON parsing
+ * @param context - Tool context with working directory and other session info
  */
 async function executeToolCall(
   parsedTC: ParsedToolCall,
-  input: Record<string, unknown>
+  input: Record<string, unknown>,
+  context: ToolContext
 ): Promise<{ value: unknown; isError: boolean }> {
   const tool = getToolByName(parsedTC.name);
 
@@ -233,7 +260,7 @@ async function executeToolCall(
   }
 
   try {
-    const result = await tool.handler(input);
+    const result = await tool.handler(input, context);
     return { value: result, isError: false };
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : String(err);

@@ -3,6 +3,7 @@
 /* ============================================================================
  * Starscape Voyager - Custom Styles
  * Deep space glassmorphic design system
+ * Phase 6: Enhanced animations and visual polish
  * ============================================================================ */
 
 /* Custom animation for message slide-up */
@@ -21,6 +22,22 @@
   animation: slide-up 0.3s ease-out;
 }
 
+/* Fade-in animation for error banner */
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-in {
+  animation: fade-in 0.25s ease-out;
+}
+
 /* Subtle pulse animation for pending tool calls */
 @keyframes pulse-subtle {
   0%, 100% {
@@ -35,6 +52,36 @@
 
 .animate-pulse-subtle {
   animation: pulse-subtle 2s ease-in-out infinite;
+}
+
+/* Status orb glow effect */
+@keyframes glow-pulse {
+  0%, 100% {
+    box-shadow: 0 0 8px 2px rgba(16, 185, 129, 0.3);
+  }
+  50% {
+    box-shadow: 0 0 16px 4px rgba(16, 185, 129, 0.5);
+  }
+}
+
+.animate-glow {
+  animation: glow-pulse 2s ease-in-out infinite;
+}
+
+/* Token counter number animation */
+@keyframes count-up {
+  from {
+    opacity: 0.5;
+    transform: translateY(2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-count {
+  animation: count-up 0.2s ease-out;
 }
 
 /* Scrollbar styling for dark theme */

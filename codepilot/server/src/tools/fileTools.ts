@@ -4,8 +4,8 @@
  */
 
 import fs from 'fs/promises';
-import type { ToolDefinition } from '../types';
-import { resolveSafePath } from './utils';
+import type { ToolDefinition, ToolContext } from '../types';
+import { resolvePath } from './utils';
 
 /**
  * Read a UTF-8 text file from the project workspace.
@@ -23,9 +23,9 @@ export const readFileTool: ToolDefinition = {
     },
     required: ['path'],
   },
-  async handler(input) {
+  async handler(input, context: ToolContext) {
     const filePath = input.path as string;
-    const absolutePath = resolveSafePath(filePath);
+    const absolutePath = resolvePath(filePath, context.workingDir);
     const content = await fs.readFile(absolutePath, 'utf8');
     return { path: filePath, content };
   },
@@ -52,10 +52,10 @@ export const writeFileTool: ToolDefinition = {
     },
     required: ['path', 'content'],
   },
-  async handler(input) {
+  async handler(input, context: ToolContext) {
     const filePath = input.path as string;
     const content = input.content as string;
-    const absolutePath = resolveSafePath(filePath);
+    const absolutePath = resolvePath(filePath, context.workingDir);
 
     // Ensure parent directory exists
     const dir = absolutePath.substring(0, absolutePath.lastIndexOf('/'));
@@ -84,9 +84,9 @@ export const listDirTool: ToolDefinition = {
     },
     required: ['path'],
   },
-  async handler(input) {
+  async handler(input, context: ToolContext) {
     const dirPath = (input.path as string) || '.';
-    const absolutePath = resolveSafePath(dirPath);
+    const absolutePath = resolvePath(dirPath, context.workingDir);
     const entries = await fs.readdir(absolutePath, { withFileTypes: true });
 
     return entries.map((entry) => ({
@@ -142,10 +142,10 @@ export const editFileTool: ToolDefinition = {
     },
     required: ['path', 'edits'],
   },
-  async handler(input) {
+  async handler(input, context: ToolContext) {
     const filePath = input.path as string;
     const edits = input.edits as EditBlock[];
-    const absolutePath = resolveSafePath(filePath);
+    const absolutePath = resolvePath(filePath, context.workingDir);
 
     // Read original content
     const originalContent = await fs.readFile(absolutePath, 'utf8');

@@ -5,8 +5,9 @@
 
 import { execFile } from 'child_process';
 import util from 'util';
-import type { ToolDefinition } from '../types';
-import { resolveSafePath, getProjectRoot } from './utils';
+import path from 'path';
+import type { ToolDefinition, ToolContext } from '../types';
+import { resolvePath, toRelativePath } from './utils';
 
 // Use execFile instead of exec to prevent shell injection attacks.
 // execFile runs the binary directly with an args array, no shell involved.
@@ -40,12 +41,12 @@ export const gitDiffTool: ToolDefinition = {
     },
     required: [],
   },
-  async handler(input) {
-    const path = input.path as string | undefined;
+  async handler(input, context: ToolContext) {
+    const filePath = input.path as string | undefined;
     const ref = input.ref as string | undefined;
     const staged = input.staged as boolean | undefined;
 
-    const projectRoot = getProjectRoot();
+    const workingDir = context.workingDir;
 
     // Build git diff command
     const args: string[] = ['diff'];
@@ -58,11 +59,10 @@ export const gitDiffTool: ToolDefinition = {
       args.push(ref);
     }
     
-    // Add path if specified (resolve to safe path first)
-    if (path) {
-      const safePath = resolveSafePath(path);
-      // Use relative path from project root for git
-      const relativePath = safePath.replace(projectRoot + '/', '');
+    // Add path if specified - use path.relative for robust path handling
+    if (filePath) {
+      const absolutePath = resolvePath(filePath, workingDir);
+      const relativePath = toRelativePath(absolutePath, workingDir);
       args.push('--', relativePath);
     }
 
@@ -71,13 +71,14 @@ export const gitDiffTool: ToolDefinition = {
 
     try {
       const { stdout, stderr } = await execFileAsync('git', args, {
-        cwd: projectRoot,
+        cwd: workingDir,
         timeout: 30000,
         maxBuffer: 1024 * 1024 * 5, // 5MB for large diffs
       });
 
       return {
         command,
+        cwd: workingDir,
         diff: stdout,
         stderr: stderr || undefined,
         hasChanges: stdout.trim().length > 0,
@@ -94,6 +95,7 @@ export const gitDiffTool: ToolDefinition = {
       if (execError.stdout !== undefined) {
         return {
           command,
+          cwd: workingDir,
           diff: execError.stdout,
           stderr: execError.stderr || undefined,
           hasChanges: (execError.stdout || '').trim().length > 0,
@@ -123,9 +125,9 @@ export const gitStatusTool: ToolDefinition = {
     },
     required: [],
   },
-  async handler(input) {
+  async handler(input, context: ToolContext) {
     const short = input.short as boolean | undefined;
-    const projectRoot = getProjectRoot();
+    const workingDir = context.workingDir;
 
     const args = ['status'];
     if (short) {
@@ -137,12 +139,13 @@ export const gitStatusTool: ToolDefinition = {
 
     try {
       const { stdout, stderr } = await execFileAsync('git', args, {
-        cwd: projectRoot,
+        cwd: workingDir,
         timeout: 10000,
       });
 
       return {
         command,
+        cwd: workingDir,
         status: stdout,
         stderr: stderr || undefined,
       };
@@ -178,21 +181,22 @@ export const gitLogTool: ToolDefinition = {
     },
     required: [],
   },
-  async handler(input) {
+  async handler(input, context: ToolContext) {
     const count = (input.count as number) || 10;
-    const path = input.path as string | undefined;
+    const filePath = input.path as string | undefined;
     const oneline = input.oneline !== false; // Default true
 
-    const projectRoot = getProjectRoot();
+    const workingDir = context.workingDir;
 
     const args = ['log', `-${count}`];
     if (oneline) {
       args.push('--oneline');
     }
     
-    if (path) {
-      const safePath = resolveSafePath(path);
-      const relativePath = safePath.replace(projectRoot + '/', '');
+    // Add path if specified - use path.relative for robust path handling
+    if (filePath) {
+      const absolutePath = resolvePath(filePath, workingDir);
+      const relativePath = toRelativePath(absolutePath, workingDir);
       args.push('--', relativePath);
     }
 
@@ -201,12 +205,13 @@ export const gitLogTool: ToolDefinition = {
 
     try {
       const { stdout, stderr } = await execFileAsync('git', args, {
-        cwd: projectRoot,
+        cwd: workingDir,
         timeout: 10000,
       });
 
       return {
         command,
+        cwd: workingDir,
         log: stdout,
         stderr: stderr || undefined,
       };

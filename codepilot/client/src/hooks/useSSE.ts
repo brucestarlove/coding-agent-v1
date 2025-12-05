@@ -6,12 +6,20 @@
 import { useEffect, useRef } from 'react';
 import { useAgentStore, type ToolCall } from '../store/useAgentStore';
 
+/** Token usage from server */
+interface TokenUsageEvent {
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+}
+
 /** Stream event from server (matches server/src/types.ts StreamEvent) */
 interface StreamEvent {
-  type: 'text_delta' | 'tool_call' | 'tool_result' | 'error' | 'done';
+  type: 'text_delta' | 'tool_call' | 'tool_result' | 'error' | 'done' | 'usage';
   text?: string;
   toolCall?: ToolCall;
   error?: string;
+  usage?: TokenUsageEvent;
 }
 
 const API_BASE = 'http://localhost:3001/api';
@@ -26,6 +34,7 @@ export function useSSE(): void {
   const appendText = useAgentStore((state) => state.appendText);
   const addToolCall = useAgentStore((state) => state.addToolCall);
   const updateToolResult = useAgentStore((state) => state.updateToolResult);
+  const updateTokenUsage = useAgentStore((state) => state.updateTokenUsage);
   const finalizeResponse = useAgentStore((state) => state.finalizeResponse);
   const setError = useAgentStore((state) => state.setError);
 
@@ -92,6 +101,18 @@ export function useSSE(): void {
       }
     });
 
+    // Handle usage events - token consumption tracking
+    eventSource.addEventListener('usage', (event) => {
+      try {
+        const data: StreamEvent = JSON.parse(event.data);
+        if (data.usage) {
+          updateTokenUsage(data.usage);
+        }
+      } catch (err) {
+        console.error('[SSE] Failed to parse usage:', err);
+      }
+    });
+
     // Handle error events
     eventSource.addEventListener('error', (event) => {
       // Check if this is a server-sent error event with data
@@ -140,6 +161,7 @@ export function useSSE(): void {
     appendText,
     addToolCall,
     updateToolResult,
+    updateTokenUsage,
     finalizeResponse,
     setError,
   ]);

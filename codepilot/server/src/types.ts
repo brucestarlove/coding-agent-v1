@@ -3,6 +3,14 @@
  */
 
 /**
+ * Context passed to tool handlers with session-specific information.
+ */
+export interface ToolContext {
+  /** Working directory for file/shell/git operations */
+  workingDir: string;
+}
+
+/**
  * Definition for a tool that can be used by the AI agent.
  * Each tool has a name, description, JSON schema for inputs, and a handler function.
  */
@@ -11,7 +19,7 @@ export interface ToolDefinition {
   description: string;
   inputSchema: object; // JSON Schema for Claude/OpenRouter API
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  handler: (input: Record<string, any>) => Promise<unknown>;
+  handler: (input: Record<string, any>, context: ToolContext) => Promise<unknown>;
 }
 
 /**
@@ -51,13 +59,24 @@ export interface ContentBlock {
 }
 
 /**
+ * Token usage information from LLM API responses.
+ */
+export interface TokenUsage {
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+}
+
+/**
  * Events streamed from the agent to the UI.
  */
 export interface StreamEvent {
-  type: 'text_delta' | 'tool_call' | 'tool_result' | 'error' | 'done';
+  type: 'text_delta' | 'tool_call' | 'tool_result' | 'error' | 'done' | 'usage';
   text?: string;
   toolCall?: ToolCall;
   error?: string;
+  /** Token usage data - only present for 'usage' events */
+  usage?: TokenUsage;
 }
 
 /**

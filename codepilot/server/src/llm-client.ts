@@ -136,19 +136,23 @@ function createOpenRouterClient(env: ReturnType<typeof getEnvConfig>) {
      * Returns the raw OpenAI streaming response for the agent loop to process
      * @param messages - Conversation history in OpenAI format
      * @param tools - Tool definitions to provide to the model
+     * @param modelOverride - Optional model to use instead of default
      */
     async streamChatWithTools(
       messages: ChatCompletionMessageParam[],
-      tools: ToolDef[]
+      tools: ToolDef[],
+      modelOverride?: string
     ) {
       const openAITools = toOpenAITools(tools);
 
       const stream = await client.chat.completions.create({
-        model,
+        model: modelOverride || model,
         messages,
         tools: openAITools.length > 0 ? openAITools : undefined,
         max_tokens: maxTokens,
         stream: true,
+        // Request usage data in the final streaming chunk
+        stream_options: { include_usage: true },
       });
 
       return stream;

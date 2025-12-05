@@ -21,6 +21,7 @@ import { Elysia } from 'elysia';
 import { node } from '@elysiajs/node';
 import { tools } from './tools/index';
 import { chatRoutes, streamRoutes } from './routes/index';
+import { getAvailableModels } from './llm-client';
 
 // Server port from environment or default
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3001;
@@ -55,6 +56,25 @@ const app = new Elysia({ adapter: node() })
       description: tool.description,
     })),
   }))
+
+  // List available LLM models with context window sizes
+  .get('/api/models', () => {
+    const models = getAvailableModels();
+    // Context windows for Claude models (in tokens)
+    const CONTEXT_WINDOWS = {
+      haiku: 200000,
+      sonnet: 200000,
+      opus: 200000,
+    };
+    return {
+      models: [
+        { id: models.haiku, name: 'Claude Haiku', description: 'Fast and efficient', contextWindow: CONTEXT_WINDOWS.haiku },
+        { id: models.sonnet, name: 'Claude Sonnet', description: 'Balanced performance', contextWindow: CONTEXT_WINDOWS.sonnet },
+        { id: models.opus, name: 'Claude Opus', description: 'Most capable', contextWindow: CONTEXT_WINDOWS.opus },
+      ],
+      default: models.sonnet,
+    };
+  })
 
   // Register API routes
   .use(chatRoutes)

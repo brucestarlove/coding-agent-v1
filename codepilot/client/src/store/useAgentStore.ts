@@ -36,6 +36,22 @@ export interface Message {
 /** Agent status states */
 export type AgentStatus = 'idle' | 'streaming' | 'error';
 
+/** Token usage tracking */
+export interface TokenUsage {
+  prompt: number;
+  completion: number;
+  total: number;
+}
+
+/** Available model for selection */
+export interface ModelOption {
+  id: string;
+  name: string;
+  description: string;
+  /** Context window size in tokens */
+  contextWindow: number;
+}
+
 // ============================================================================
 // Store Interface
 // ============================================================================
@@ -45,6 +61,8 @@ interface AgentState {
   sessionId: string | null;
   status: AgentStatus;
   error: string | null;
+  /** Current working directory for tool operations */
+  workingDir: string | null;
 
   // Message state
   messages: Message[];
@@ -55,15 +73,36 @@ interface AgentState {
    */
   currentContent: ContentBlock[];
 
+  // Token usage tracking (cumulative across session)
+  tokenUsage: TokenUsage | null;
+
+  // Model selection
+  selectedModel: string | null;
+  availableModels: ModelOption[];
+
+  // Last message for retry functionality
+  lastUserMessage: string | null;
+
   // Actions
   sendMessage: (text: string) => Promise<void>;
   stopAgent: () => Promise<void>;
   clearSession: () => void;
+  /** Update working directory for current session */
+  setWorkingDir: (workingDir: string) => Promise<boolean>;
+
+  // Error recovery actions
+  dismissError: () => void;
+  retryLastMessage: () => Promise<void>;
+
+  // Model selection
+  setSelectedModel: (modelId: string) => void;
+  fetchAvailableModels: () => Promise<void>;
 
   // Streaming handlers (called by useSSE hook)
   appendText: (text: string) => void;
   addToolCall: (toolCall: ToolCall) => void;
   updateToolResult: (id: string, result: unknown, error?: string) => void;
+  updateTokenUsage: (usage: { prompt_tokens: number; completion_tokens: number; total_tokens: number }) => void;
   finalizeResponse: () => void;
   setError: (error: string) => void;
 }
@@ -83,8 +122,13 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   sessionId: null,
   status: 'idle',
   error: null,
+  workingDir: null,
   messages: [],
   currentContent: [],
+  tokenUsage: null,
+  selectedModel: null,
+  availableModels: [],
+  lastUserMessage: null,
 
   /**
    * Send a message to start a new conversation or continue existing one.
@@ -113,14 +157,20 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       status: 'streaming',
       error: null,
       currentContent: [],
+      lastUserMessage: text,
     });
 
     try {
       // Start new conversation via API
+      const { selectedModel, workingDir } = get();
       const response = await fetch(`${API_BASE}/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: text }),
+        body: JSON.stringify({ 
+          message: text,
+          model: selectedModel || undefined,
+          workingDir: workingDir || undefined,
+        }),
       });
 
       if (!response.ok) {
@@ -128,7 +178,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       }
 
       const data = await response.json();
-      set({ sessionId: data.sessionId });
+      set({ sessionId: data.sessionId, workingDir: data.workingDir });
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : String(err);
       console.error('[Store] Failed to send message:', errorMessage);
@@ -197,9 +247,111 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       sessionId: null,
       status: 'idle',
       error: null,
+      workingDir: null,
       messages: [],
       currentContent: [],
+      tokenUsage: null,
+      lastUserMessage: null,
     });
+  },
+
+  /**
+   * Update working directory for the current session
+   * Always updates local state - server sync is best-effort.
+   * @returns true if successful (or no session to sync), false if server sync failed
+   */
+  setWorkingDir: async (workingDir: string) => {
+    const { sessionId } = get();
+    
+    // Always update local state first - this ensures cwd works even if
+    // the session is stale/expired on the server
+    set({ workingDir });
+    
+    // If no session exists, we're done (will be sent with first message)
+    if (!sessionId) {
+      return true;
+    }
+
+    // Try to sync with server (best-effort - local state already updated)
+    try {
+      const response = await fetch(`${API_BASE}/session/${sessionId}/cwd`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ workingDir }),
+      });
+
+      if (!response.ok) {
+        // Session might be gone - that's okay, local state is updated
+        // and next message will create a new session with this cwd
+        console.warn('[Store] Could not sync working directory to server:', response.statusText);
+        return false;
+      }
+
+      return true;
+    } catch (err) {
+      console.warn('[Store] Could not sync working directory to server:', err);
+      return false;
+    }
+  },
+
+  /**
+   * Dismiss the current error and return to idle state
+   */
+  dismissError: () => {
+    set({
+      status: 'idle',
+      error: null,
+    });
+  },
+
+  /**
+   * Retry the last message that caused an error
+   */
+  retryLastMessage: async () => {
+    const { lastUserMessage, status } = get();
+    
+    if (status !== 'error' || !lastUserMessage) {
+      console.warn('[Store] Cannot retry - no error state or last message');
+      return;
+    }
+
+    // Clear error and remove the failed user message before resending
+    const messages = get().messages;
+    const updatedMessages = messages.slice(0, -1); // Remove last message (the failed one)
+    
+    set({
+      messages: updatedMessages,
+      error: null,
+    });
+
+    // Resend the message
+    await get().sendMessage(lastUserMessage);
+  },
+
+  /**
+   * Set the selected model for new conversations
+   */
+  setSelectedModel: (modelId: string) => {
+    set({ selectedModel: modelId });
+  },
+
+  /**
+   * Fetch available models from the server
+   */
+  fetchAvailableModels: async () => {
+    try {
+      const response = await fetch(`${API_BASE}/models`);
+      if (!response.ok) {
+        throw new Error(`Failed to fetch models: ${response.status}`);
+      }
+      const data = await response.json();
+      set({
+        availableModels: data.models,
+        selectedModel: get().selectedModel || data.default,
+      });
+    } catch (err) {
+      console.error('[Store] Failed to fetch models:', err);
+    }
   },
 
   /**
@@ -256,6 +408,20 @@ export const useAgentStore = create<AgentState>((set, get) => ({
             }
           : block
       ),
+    });
+  },
+
+  /**
+   * Update cumulative token usage (adds to existing totals)
+   */
+  updateTokenUsage: (usage: { prompt_tokens: number; completion_tokens: number; total_tokens: number }) => {
+    const { tokenUsage } = get();
+    set({
+      tokenUsage: {
+        prompt: (tokenUsage?.prompt || 0) + usage.prompt_tokens,
+        completion: (tokenUsage?.completion || 0) + usage.completion_tokens,
+        total: (tokenUsage?.total || 0) + usage.total_tokens,
+      },
     });
   },
 

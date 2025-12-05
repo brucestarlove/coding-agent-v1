@@ -1,10 +1,11 @@
 /**
  * CodePilot - Main Application Component
  * 
- * Phase 4: Basic Chat UI with SSE streaming.
+ * Phase 6: Session Controls & Polish
  * Starscape Voyager design - "Interstellar Cockpit" aesthetic.
  */
 
+import { useEffect } from 'react';
 import { ChatStream } from './components/ChatStream';
 import { InputArea } from './components/InputArea';
 import { useSSE } from './hooks/useSSE';
@@ -12,11 +13,20 @@ import { useAgentStore } from './store/useAgentStore';
 
 /**
  * Root application component.
- * Layout: Header + ChatStream + InputArea (docked bottom)
+ * Layout: Header + ErrorBanner + ChatStream + InputArea (docked bottom)
  */
 function App() {
   // Initialize SSE connection manager
   useSSE();
+
+  // Fetch available models on mount
+  const fetchAvailableModels = useAgentStore((state) => state.fetchAvailableModels);
+  useEffect(() => {
+    fetchAvailableModels();
+  }, [fetchAvailableModels]);
+
+  const status = useAgentStore((state) => state.status);
+  const error = useAgentStore((state) => state.error);
 
   return (
     <div className="h-screen flex flex-col bg-[url('/GeminiNB2-Starscape.png')] bg-cover bg-center bg-no-repeat text-white relative">
@@ -27,6 +37,9 @@ function App() {
       <div className="relative z-10 flex flex-col flex-1 min-h-0">
         {/* Header - Status bar */}
         <Header />
+
+        {/* Error banner - shows below header when in error state */}
+        {status === 'error' && error && <ErrorBanner error={error} />}
 
         {/* Main content - Chat stream */}
         <ChatStream />
@@ -63,7 +76,7 @@ function Header() {
       </div>
 
       {/* Session controls */}
-      <div className="flex items-center gap-4">
+      <div className="flex items-center gap-3">
         {/* Status orb */}
         <StatusOrb status={status} />
         
@@ -147,6 +160,75 @@ function StatusBadge({ status }: { status: string }) {
       )}
       {text}
     </span>
+  );
+}
+
+/**
+ * Error banner with retry and dismiss buttons.
+ */
+function ErrorBanner({ error }: { error: string }) {
+  const retryLastMessage = useAgentStore((state) => state.retryLastMessage);
+  const dismissError = useAgentStore((state) => state.dismissError);
+  const lastUserMessage = useAgentStore((state) => state.lastUserMessage);
+
+  return (
+    <div className="animate-fade-in bg-gradient-to-r from-pink-500/20 to-rose-500/20 border-b border-pink-500/30 px-6 py-3">
+      <div className="max-w-4xl mx-auto flex items-center justify-between gap-4">
+        {/* Error message */}
+        <div className="flex items-center gap-3 flex-1 min-w-0">
+          {/* Error icon */}
+          <div className="flex-shrink-0 w-6 h-6 rounded-full bg-pink-500/20 flex items-center justify-center">
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className="text-pink-400"
+            >
+              <circle cx="12" cy="12" r="10" />
+              <line x1="12" y1="8" x2="12" y2="12" />
+              <line x1="12" y1="16" x2="12.01" y2="16" />
+            </svg>
+          </div>
+          <p className="text-sm text-pink-200 truncate">{error}</p>
+        </div>
+
+        {/* Action buttons */}
+        <div className="flex items-center gap-2 flex-shrink-0">
+          {/* Retry button - only show if we have a last message */}
+          {lastUserMessage && (
+            <button
+              onClick={retryLastMessage}
+              className="
+                px-3 py-1.5 rounded-lg text-xs font-medium
+                bg-pink-500/20 border border-pink-500/30
+                text-pink-200 hover:text-white hover:bg-pink-500/30
+                transition-colors duration-200
+              "
+            >
+              Retry
+            </button>
+          )}
+          
+          {/* Dismiss button */}
+          <button
+            onClick={dismissError}
+            className="
+              px-3 py-1.5 rounded-lg text-xs
+              bg-white/5 border border-white/10
+              text-white/50 hover:text-white/80 hover:bg-white/10
+              transition-colors duration-200
+            "
+          >
+            Dismiss
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 
