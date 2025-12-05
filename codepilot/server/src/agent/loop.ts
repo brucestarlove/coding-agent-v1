@@ -21,6 +21,9 @@ import { countTokens } from '../providers/token-counter';
 // Maximum number of tool call rounds to prevent infinite loops
 const MAX_TOOL_ROUNDS = 100;
 
+// Default wall-clock timeout for agent runs (108 seconds)
+const DEFAULT_MAX_WALL_CLOCK_MS = 108 * 1000;
+
 // Ensure tools are registered
 let toolsRegistered = false;
 function ensureToolsRegistered(): void {
@@ -48,6 +51,8 @@ export interface AgentLoopConfig {
   model?: string;
   /** Optional pre-loaded tools (for session continuity) */
   loadedTools?: Set<string>;
+  /** Maximum wall-clock time for the entire agent run in ms (default: 5 minutes) */
+  maxWallClockMs?: number;
 }
 
 /**
@@ -104,7 +109,16 @@ function createToolResultMessages(
  * - Loaded tools persist for the duration of the session
  */
 export async function* runAgentLoop(config: AgentLoopConfig): AsyncGenerator<StreamEvent> {
-  const { userPrompt, systemPrompt = CODING_AGENT_SYSTEM_PROMPT, signal, model } = config;
+  const {
+    userPrompt,
+    systemPrompt = CODING_AGENT_SYSTEM_PROMPT,
+    signal,
+    model,
+    maxWallClockMs = DEFAULT_MAX_WALL_CLOCK_MS,
+  } = config;
+
+  // Track start time for wall-clock timeout
+  const startTime = Date.now();
 
   // Ensure tools are registered with the global registry
   ensureToolsRegistered();
@@ -161,6 +175,18 @@ export async function* runAgentLoop(config: AgentLoopConfig): AsyncGenerator<Str
     // Check for abort before each LLM call
     if (signal?.aborted) {
       yield { type: 'error', error: 'Aborted by user' };
+      yield { type: 'done' };
+      return;
+    }
+
+    // Check for wall-clock timeout
+    const elapsed = Date.now() - startTime;
+    if (elapsed >= maxWallClockMs) {
+      const elapsedSec = Math.round(elapsed / 1000);
+      yield {
+        type: 'error',
+        error: `Agent timed out after ${elapsedSec}s (limit: ${Math.round(maxWallClockMs / 1000)}s)`,
+      };
       yield { type: 'done' };
       return;
     }
