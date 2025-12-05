@@ -10,13 +10,14 @@
 
 import { useState, useRef, useEffect, type KeyboardEvent, type FocusEvent } from 'react';
 import { useAgentStore, type TokenUsage, type ModelOption } from '../store/useAgentStore';
+import { useDelayedHover } from '../hooks/useDelayedHover';
+import { TooltipContent } from './Tooltip';
 
 /**
  * Input area docked at bottom of chat - the "Helm" in Starscape terminology.
  */
 export function InputArea() {
   const [input, setInput] = useState('');
-  const [showKeyboardHints, setShowKeyboardHints] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const status = useAgentStore((state) => state.status);
@@ -32,6 +33,11 @@ export function InputArea() {
   // Get context window for selected model
   const contextWindow = availableModels.find(m => m.id === selectedModel)?.contextWindow || 200000;
   const canSend = input.trim().length > 0 && !isStreaming;
+
+  // Delayed hover for keyboard hints tooltip (2 second delay)
+  const { isHovered: showKeyboardHints, hoverProps: keyboardHintsHoverProps } = useDelayedHover({ 
+    showDelay: 2000 
+  });
 
   /**
    * Handle form submission
@@ -90,8 +96,7 @@ export function InputArea() {
         <div className="flex items-end gap-3">
           <div 
             className="flex-1 relative"
-            onMouseEnter={() => setShowKeyboardHints(true)}
-            onMouseLeave={() => setShowKeyboardHints(false)}
+            {...keyboardHintsHoverProps}
           >
             <textarea
               ref={textareaRef}
@@ -124,22 +129,7 @@ export function InputArea() {
 
             {/* Keyboard hints tooltip */}
             {showKeyboardHints && (
-              <div
-                className="
-                  absolute bottom-full left-1/2 -translate-x-1/2 mb-2
-                  px-3 py-2 rounded-lg
-                  bg-[hsl(222,84%,8%)] border border-white/10
-                  shadow-xl shadow-black/50
-                  text-xs text-white/50
-                  whitespace-nowrap z-50
-                  animate-fade-in
-                "
-              >
-                {/* Arrow */}
-                <div className="absolute top-full left-1/2 -translate-x-1/2 -mt-px">
-                  <div className="border-4 border-transparent border-t-white/10" />
-                </div>
-                
+              <TooltipContent position="top" className="text-white/50">
                 <div className="flex items-center gap-3">
                   <span>
                     <kbd className="px-1.5 py-0.5 bg-white/10 rounded text-white/70">Enter</kbd>
@@ -160,7 +150,7 @@ export function InputArea() {
                     </>
                   )}
                 </div>
-              </div>
+              </TooltipContent>
             )}
           </div>
 
