@@ -49,6 +49,25 @@ interface EditFileResult {
   success: boolean;
 }
 
+interface GitDiffResult {
+  command: string;
+  diff: string;
+  stderr?: string;
+  hasChanges: boolean;
+}
+
+interface GitStatusResult {
+  command: string;
+  status: string;
+  stderr?: string;
+}
+
+interface GitLogResult {
+  command: string;
+  log: string;
+  stderr?: string;
+}
+
 // ============================================================================
 // Main ToolCallView Component
 // ============================================================================
@@ -116,6 +135,9 @@ function ToolHeader({ toolCall, isExpanded, onToggle }: ToolHeaderProps) {
     write_file: '✏️',
     edit_file: '📝',
     list_dir: '📁',
+    git_diff: '±',
+    git_status: '⎇',
+    git_log: '⏱',
   };
 
   const statusBadge = {
@@ -194,6 +216,12 @@ function ToolBody({ toolCall }: { toolCall: ToolCall }) {
       return <EditFileToolView toolCall={toolCall} />;
     case 'list_dir':
       return <ListDirToolView toolCall={toolCall} />;
+    case 'git_diff':
+      return <GitDiffToolView toolCall={toolCall} />;
+    case 'git_status':
+      return <GitStatusToolView toolCall={toolCall} />;
+    case 'git_log':
+      return <GitLogToolView toolCall={toolCall} />;
     default:
       return <GenericToolView toolCall={toolCall} />;
   }
@@ -499,6 +527,154 @@ function DiffLine({ line }: { line: string }) {
 }
 
 // ============================================================================
+// Git Diff Tool View
+// ============================================================================
+
+/**
+ * Renders git diff output with syntax highlighting.
+ */
+function GitDiffToolView({ toolCall }: { toolCall: ToolCall }) {
+  const input = toolCall.input as { path?: string; ref?: string; staged?: boolean };
+  const result = toolCall.result as GitDiffResult | undefined;
+
+  return (
+    <div className="space-y-2">
+      {/* Path if specified */}
+      {input.path && <FilePath path={input.path} />}
+      
+      {/* Ref comparison if specified */}
+      {input.ref && (
+        <div className="text-xs text-white/40">
+          Comparing against: <span className="text-cyan-400">{input.ref}</span>
+        </div>
+      )}
+
+      {/* Error message */}
+      {toolCall.error && <ErrorDisplay message={toolCall.error} />}
+
+      {/* No changes indicator */}
+      {result && !result.hasChanges && (
+        <div className="text-xs text-white/50 italic">No changes</div>
+      )}
+
+      {/* Diff output */}
+      {result?.diff && result.hasChanges && (
+        <GitDiffOutput diff={result.diff} />
+      )}
+    </div>
+  );
+}
+
+/**
+ * Renders git diff output with proper line coloring.
+ */
+function GitDiffOutput({ diff }: { diff: string }) {
+  const [isExpanded, setIsExpanded] = useState(false);
+  
+  const lines = diff.split('\n');
+  
+  // Count changes
+  const additions = lines.filter(l => l.startsWith('+') && !l.startsWith('+++')).length;
+  const deletions = lines.filter(l => l.startsWith('-') && !l.startsWith('---')).length;
+
+  // Limit display when collapsed
+  const displayLines = isExpanded ? lines : lines.slice(0, 30);
+  const isTruncated = lines.length > 30;
+
+  return (
+    <div className="space-y-1">
+      {/* Diff stats */}
+      <div className="flex items-center gap-3 text-xs">
+        <span className="text-emerald-400">+{additions}</span>
+        <span className="text-pink-400">−{deletions}</span>
+      </div>
+
+      {/* Diff content */}
+      <div className="bg-black/30 rounded-lg border border-white/10 overflow-hidden">
+        <pre className={`font-mono text-xs overflow-x-auto ${isExpanded ? 'max-h-96' : 'max-h-64'} overflow-y-auto`}>
+          {displayLines.map((line, i) => (
+            <DiffLine key={i} line={line} />
+          ))}
+          {!isExpanded && isTruncated && (
+            <div className="px-2 py-1 text-white/40 italic">
+              ... {lines.length - 30} more lines
+            </div>
+          )}
+        </pre>
+      </div>
+
+      {/* Expand/collapse */}
+      {isTruncated && (
+        <button
+          onClick={() => setIsExpanded(!isExpanded)}
+          className="text-xs text-violet-400 hover:text-violet-300 transition-colors"
+        >
+          {isExpanded ? '← Show less' : `Show all ${lines.length} lines →`}
+        </button>
+      )}
+    </div>
+  );
+}
+
+// ============================================================================
+// Git Status Tool View
+// ============================================================================
+
+/**
+ * Renders git status output.
+ */
+function GitStatusToolView({ toolCall }: { toolCall: ToolCall }) {
+  const result = toolCall.result as GitStatusResult | undefined;
+
+  return (
+    <div className="space-y-2">
+      {/* Error message */}
+      {toolCall.error && <ErrorDisplay message={toolCall.error} />}
+
+      {/* Status output */}
+      {result?.status && (
+        <pre className="font-mono text-xs bg-black/30 rounded-lg p-2 overflow-x-auto text-white/80 border border-white/10 max-h-64 overflow-y-auto whitespace-pre-wrap">
+          {result.status}
+        </pre>
+      )}
+    </div>
+  );
+}
+
+// ============================================================================
+// Git Log Tool View
+// ============================================================================
+
+/**
+ * Renders git log output.
+ */
+function GitLogToolView({ toolCall }: { toolCall: ToolCall }) {
+  const input = toolCall.input as { path?: string; count?: number };
+  const result = toolCall.result as GitLogResult | undefined;
+
+  return (
+    <div className="space-y-2">
+      {/* Path if specified */}
+      {input.path && (
+        <div className="text-xs text-white/40">
+          Commits for: <span className="text-cyan-400">{input.path}</span>
+        </div>
+      )}
+
+      {/* Error message */}
+      {toolCall.error && <ErrorDisplay message={toolCall.error} />}
+
+      {/* Log output */}
+      {result?.log && (
+        <pre className="font-mono text-xs bg-black/30 rounded-lg p-2 overflow-x-auto text-white/80 border border-white/10 max-h-64 overflow-y-auto whitespace-pre-wrap">
+          {result.log}
+        </pre>
+      )}
+    </div>
+  );
+}
+
+// ============================================================================
 // List Directory Tool View
 // ============================================================================
 
@@ -732,6 +908,9 @@ function formatToolName(name: string): string {
     write_file: 'Write File',
     edit_file: 'Edit File',
     list_dir: 'List Directory',
+    git_diff: 'Git Diff',
+    git_status: 'Git Status',
+    git_log: 'Git Log',
   };
   return names[name] ?? name;
 }
@@ -751,6 +930,12 @@ function getToolSummary(toolCall: ToolCall): string {
       return String(input.path ?? '');
     case 'list_dir':
       return String(input.path ?? '.');
+    case 'git_diff':
+      return input.path ? String(input.path) : 'working directory';
+    case 'git_status':
+      return '';
+    case 'git_log':
+      return input.path ? String(input.path) : '';
     default:
       return '';
   }

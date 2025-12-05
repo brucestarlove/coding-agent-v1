@@ -5,6 +5,7 @@
  */
 
 import { randomUUID } from 'crypto';
+import path from 'path';
 import type { ChatCompletionMessageParam } from 'openai/resources/chat/completions';
 import type { StreamEvent } from './types';
 
@@ -107,15 +108,17 @@ function generateSessionId(): string {
 
 /**
  * Create a new session
- * @param workingDir - Working directory for the session (defaults to cwd)
+ * @param workingDir - Working directory for the session (defaults to parent of cwd)
  */
 export function createSession(workingDir?: string): SessionState {
   const id = generateSessionId();
+  // Default to parent directory since server runs from /codepilot/server
+  const defaultWorkingDir = process.env.PROJECT_ROOT || path.resolve(process.cwd(), '..');
   const session: SessionState = {
     id,
     status: 'idle',
     messages: [],
-    workingDir: workingDir || process.cwd(),
+    workingDir: workingDir || defaultWorkingDir,
     abortController: new AbortController(),
     createdAt: new Date(),
     eventQueue: new EventQueue(),

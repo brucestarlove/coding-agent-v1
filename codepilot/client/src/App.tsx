@@ -19,15 +19,21 @@ function App() {
   useSSE();
 
   return (
-    <div className="h-screen flex flex-col bg-[hsl(222,84%,5%)] text-white">
-      {/* Header - Status bar */}
-      <Header />
+    <div className="h-screen flex flex-col bg-[url('/GeminiNB2-Starscape.png')] bg-cover bg-center bg-no-repeat text-white relative">
+      {/* Dark overlay */}
+      <div className="absolute inset-0 bg-black/40" />
+      
+      {/* Content wrapper above overlay */}
+      <div className="relative z-10 flex flex-col flex-1 min-h-0">
+        {/* Header - Status bar */}
+        <Header />
 
-      {/* Main content - Chat stream */}
-      <ChatStream />
+        {/* Main content - Chat stream */}
+        <ChatStream />
 
-      {/* Input area - The Helm */}
-      <InputArea />
+        {/* Input area - The Helm */}
+        <InputArea />
+      </div>
     </div>
   );
 }
@@ -43,18 +49,24 @@ function Header() {
   return (
     <header className="border-b border-white/10 px-6 py-3 flex items-center justify-between bg-[hsl(222,84%,4%)]">
       {/* Branding */}
-      <div className="flex items-center gap-3">
-        {/* Synthetic Star - status indicator */}
-        <StatusOrb status={status} />
-        
-        <div>
-          <h1 className="text-lg font-semibold text-white/90">CodePilot</h1>
-          <p className="text-xs text-white/40">AI Coding Assistant</p>
-        </div>
+      <div className="flex items-center gap-2">
+        <img 
+          src="/nova01.png" 
+          alt="Nova" 
+          className="h-10 w-auto"
+        />
+        <img 
+          src="/nova04.png" 
+          alt="Nova" 
+          className="h-8 w-auto"
+        />
       </div>
 
       {/* Session controls */}
       <div className="flex items-center gap-4">
+        {/* Status orb */}
+        <StatusOrb status={status} />
+        
         {/* Status text */}
         <StatusBadge status={status} />
 
@@ -82,9 +94,9 @@ function Header() {
   );
 }
 
+
 /**
- * Status orb - "Synthetic Star" from Starscape design.
- * Visual indicator of agent state.
+ * Status orb - "Synthetic Star" visual indicator of agent state.
  */
 function StatusOrb({ status }: { status: string }) {
   const colors = {
@@ -100,14 +112,14 @@ function StatusOrb({ status }: { status: string }) {
     <div className="relative">
       <div
         className={`
-          w-8 h-8 rounded-full bg-gradient-to-br ${color}
+          w-6 h-6 rounded-full bg-gradient-to-br ${color}
           ${isActive ? 'animate-pulse' : ''}
         `}
       />
       {isActive && (
         <div
           className={`
-            absolute inset-0 w-8 h-8 rounded-full bg-gradient-to-br ${color}
+            absolute inset-0 w-6 h-6 rounded-full bg-gradient-to-br ${color}
             opacity-50 animate-ping
           `}
         />
