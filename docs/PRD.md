@@ -523,6 +523,155 @@ function ToolCallView({ toolCall }: { toolCall: ToolCall }) {
 - [ ] Long outputs are truncated with expand option
 - [ ] Error states are clearly visible
 
+### Phase 5.5: Extra Tools
+
+## Current Tools
+
+Your agent currently has 4 tools:
+1. **`read_file`** - Read file contents
+2. **`write_file`** - Create/overwrite entire files
+3. **`list_dir`** - List directory contents
+4. **`run_shell`** - Execute shell commands
+
+## Recommended Additional Tools
+
+### 1. **`edit_file` (Code Diff Tool)** - Most Important!
+
+This is the big one you're asking about. Instead of overwriting entire files, this tool applies targeted edits:
+
+```typescript
+// Example tool definition
+export const editFileTool: ToolDefinition = {
+  name: 'edit_file',
+  description: 'Apply targeted edits to a file using search/replace blocks',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      path: { type: 'string', description: 'File path' },
+      edits: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: {
+            old_text: { type: 'string', description: 'Text to find' },
+            new_text: { type: 'string', description: 'Replacement text' },
+          },
+        },
+      },
+    },
+    required: ['path', 'edits'],
+  },
+  async handler(input) {
+    // Read file, apply edits, return diff
+    const oldContent = await fs.readFile(path, 'utf8');
+    let newContent = oldContent;
+    for (const edit of edits) {
+      newContent = newContent.replace(edit.old_text, edit.new_text);
+    }
+    await fs.writeFile(path, newContent);
+    return { 
+      path, 
+      oldContent,  // For diff view
+      newContent,
+      success: true 
+    };
+  },
+};
+```
+
+For the **UI diff view**, you'd add a new renderer in `ToolCallView.tsx` using a library like `diff` or `diff2html`:
+
+```bash
+pnpm add diff
+```
+
+```tsx
+// EditFileToolView component
+function EditFileToolView({ toolCall }) {
+  const { oldContent, newContent, path } = toolCall.result;
+  
+  // Generate unified diff
+  const diff = createPatch(path, oldContent, newContent);
+  
+  return (
+    <div>
+      <FilePath path={path} />
+      <DiffViewer diff={diff} /> {/* Syntax-highlighted diff */}
+    </div>
+  );
+}
+```
+
+---
+
+### 2. **Search Tools**
+
+| Tool | Purpose |
+|------|---------|
+| `grep` / `search_files` | Find text patterns across files (regex support) |
+| `find_files` / `glob` | Find files by name pattern |
+
+```typescript
+// grep tool
+{
+  name: 'grep',
+  input: { pattern: string, path?: string, regex?: boolean },
+  returns: [{ file: string, line: number, content: string }]
+}
+```
+
+---
+
+### 3. **Git Tools**
+
+| Tool | Purpose |
+|------|---------|
+| `git_status` | Show changed/staged files |
+| `git_diff` | Show uncommitted changes |
+| `git_commit` | Create commits |
+| `git_log` | View commit history |
+
+---
+
+### 4. **File Management**
+
+| Tool | Purpose |
+|------|---------|
+| `delete_file` | Remove files (with confirmation) |
+| `move_file` | Move/rename files |
+| `create_dir` | Create directories |
+
+---
+
+### 5. **Web/Research Tools**
+
+| Tool | Purpose |
+|------|---------|
+| `web_search` | Search the internet |
+| `fetch_url` | Read webpage content |
+
+---
+
+### 6. **Code Intelligence Tools**
+
+| Tool | Purpose |
+|------|---------|
+| `find_definition` | Jump to symbol definition (LSP) |
+| `find_references` | Find all references to symbol |
+| `get_diagnostics` | Get TypeScript/linting errors |
+
+---
+
+## My Recommendation: Start with `edit_file`
+
+The **`edit_file` tool with a diff viewer** is the highest-value addition because:
+
+1. **Safer edits** - Targeted changes vs. overwriting entire files
+2. **Better UX** - Users can see exactly what changed
+3. **Smaller context** - LLM sends only the edits, not full file content
+4. **Standard pattern** - This is what Cursor, Claude Code, and Aider all use
+
+
 ---
 
 ### Phase 6: Session Controls & Polish

@@ -11,6 +11,7 @@
  */
 
 import { useState } from 'react';
+import { createTwoFilesPatch } from 'diff';
 import type { ToolCall } from '../store/useAgentStore';
 
 // ============================================================================
@@ -38,6 +39,14 @@ interface ShellResult {
   stdout: string;
   stderr: string;
   exitCode: number;
+}
+
+interface EditFileResult {
+  path: string;
+  oldContent: string;
+  newContent: string;
+  editsApplied: number;
+  success: boolean;
 }
 
 // ============================================================================
@@ -105,6 +114,7 @@ function ToolHeader({ toolCall, isExpanded, onToggle }: ToolHeaderProps) {
     run_shell: '⌘',
     read_file: '📄',
     write_file: '✏️',
+    edit_file: '📝',
     list_dir: '📁',
   };
 
@@ -180,6 +190,8 @@ function ToolBody({ toolCall }: { toolCall: ToolCall }) {
       return <ReadFileToolView toolCall={toolCall} />;
     case 'write_file':
       return <WriteFileToolView toolCall={toolCall} />;
+    case 'edit_file':
+      return <EditFileToolView toolCall={toolCall} />;
     case 'list_dir':
       return <ListDirToolView toolCall={toolCall} />;
     default:
@@ -324,6 +336,164 @@ function WriteFileToolView({ toolCall }: { toolCall: ToolCall }) {
           <CodeBlock content={input.content} />
         </div>
       )}
+    </div>
+  );
+}
+
+// ============================================================================
+// Edit File Tool View (with Diff)
+// ============================================================================
+
+/**
+ * Renders file edit operation with unified diff view.
+ */
+function EditFileToolView({ toolCall }: { toolCall: ToolCall }) {
+  const input = toolCall.input as { path?: string; edits?: Array<{ old_text: string; new_text: string }> };
+  const result = toolCall.result as EditFileResult | undefined;
+
+  return (
+    <div className="space-y-2">
+      {/* File path */}
+      <FilePath path={input.path ?? 'unknown'} />
+
+      {/* Edits summary while pending */}
+      {toolCall.status === 'pending' && input.edits && (
+        <div className="text-xs text-white/40">
+          Applying {input.edits.length} edit{input.edits.length !== 1 ? 's' : ''}...
+        </div>
+      )}
+
+      {/* Error message */}
+      {toolCall.error && <ErrorDisplay message={toolCall.error} />}
+
+      {/* Success indicator */}
+      {result?.success && (
+        <div className="flex items-center gap-2 text-xs text-emerald-400">
+          <span>✓</span>
+          <span>{result.editsApplied} edit{result.editsApplied !== 1 ? 's' : ''} applied</span>
+        </div>
+      )}
+
+      {/* Diff view */}
+      {result?.oldContent && result?.newContent && (
+        <DiffViewer
+          path={input.path ?? 'file'}
+          oldContent={result.oldContent}
+          newContent={result.newContent}
+        />
+      )}
+    </div>
+  );
+}
+
+/**
+ * Unified diff viewer with syntax highlighting.
+ */
+function DiffViewer({
+  path,
+  oldContent,
+  newContent,
+}: {
+  path: string;
+  oldContent: string;
+  newContent: string;
+}) {
+  const [isExpanded, setIsExpanded] = useState(false);
+
+  // Generate unified diff
+  const diff = createTwoFilesPatch(
+    path,
+    path,
+    oldContent,
+    newContent,
+    'original',
+    'modified'
+  );
+
+  // Parse diff into lines for rendering
+  const diffLines = diff.split('\n');
+  
+  // Skip the header lines (first 4 lines: ---, +++, @@)
+  const contentLines = diffLines.slice(2);
+  
+  // Count changes
+  const additions = contentLines.filter(l => l.startsWith('+')).length;
+  const deletions = contentLines.filter(l => l.startsWith('-')).length;
+
+  // Limit display when collapsed
+  const displayLines = isExpanded ? contentLines : contentLines.slice(0, 20);
+  const isTruncated = contentLines.length > 20;
+
+  return (
+    <div className="space-y-1">
+      {/* Diff stats */}
+      <div className="flex items-center gap-3 text-xs">
+        <span className="text-emerald-400">+{additions}</span>
+        <span className="text-pink-400">−{deletions}</span>
+      </div>
+
+      {/* Diff content */}
+      <div className="bg-black/30 rounded-lg border border-white/10 overflow-hidden">
+        <pre className={`font-mono text-xs overflow-x-auto ${isExpanded ? 'max-h-96' : 'max-h-64'} overflow-y-auto`}>
+          {displayLines.map((line, i) => (
+            <DiffLine key={i} line={line} />
+          ))}
+          {!isExpanded && isTruncated && (
+            <div className="px-2 py-1 text-white/40 italic">
+              ... {contentLines.length - 20} more lines
+            </div>
+          )}
+        </pre>
+      </div>
+
+      {/* Expand/collapse */}
+      {isTruncated && (
+        <button
+          onClick={() => setIsExpanded(!isExpanded)}
+          className="text-xs text-violet-400 hover:text-violet-300 transition-colors"
+        >
+          {isExpanded ? '← Show less' : `Show all ${contentLines.length} lines →`}
+        </button>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Single diff line with appropriate styling.
+ */
+function DiffLine({ line }: { line: string }) {
+  // Hunk header (@@)
+  if (line.startsWith('@@')) {
+    return (
+      <div className="px-2 py-0.5 bg-violet-500/10 text-violet-400 border-y border-violet-500/20">
+        {line}
+      </div>
+    );
+  }
+
+  // Addition
+  if (line.startsWith('+')) {
+    return (
+      <div className="px-2 py-0.5 bg-emerald-500/10 text-emerald-300 border-l-2 border-emerald-500">
+        {line}
+      </div>
+    );
+  }
+
+  // Deletion
+  if (line.startsWith('-')) {
+    return (
+      <div className="px-2 py-0.5 bg-pink-500/10 text-pink-300 border-l-2 border-pink-500">
+        {line}
+      </div>
+    );
+  }
+
+  // Context line
+  return (
+    <div className="px-2 py-0.5 text-white/60 border-l-2 border-transparent">
+      {line || ' '}
     </div>
   );
 }
@@ -560,6 +730,7 @@ function formatToolName(name: string): string {
     run_shell: 'Shell',
     read_file: 'Read File',
     write_file: 'Write File',
+    edit_file: 'Edit File',
     list_dir: 'List Directory',
   };
   return names[name] ?? name;
@@ -576,6 +747,7 @@ function getToolSummary(toolCall: ToolCall): string {
       return truncate(String(input.command ?? ''), 40);
     case 'read_file':
     case 'write_file':
+    case 'edit_file':
       return String(input.path ?? '');
     case 'list_dir':
       return String(input.path ?? '.');

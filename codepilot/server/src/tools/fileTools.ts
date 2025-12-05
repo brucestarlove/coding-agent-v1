@@ -95,3 +95,99 @@ export const listDirTool: ToolDefinition = {
     }));
   },
 };
+
+/**
+ * Edit interface for search/replace operations.
+ */
+interface EditBlock {
+  old_text: string;
+  new_text: string;
+}
+
+/**
+ * Apply targeted edits to a file using search/replace blocks.
+ * More precise than write_file - only changes specific sections.
+ */
+export const editFileTool: ToolDefinition = {
+  name: 'edit_file',
+  description:
+    'Apply targeted edits to a file using search/replace blocks. ' +
+    'Each edit finds exact text and replaces it. ' +
+    'Use this instead of write_file when making small changes to existing files.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      path: {
+        type: 'string',
+        description: 'Relative path from project root',
+      },
+      edits: {
+        type: 'array',
+        description: 'Array of search/replace edit blocks to apply in order',
+        items: {
+          type: 'object',
+          properties: {
+            old_text: {
+              type: 'string',
+              description: 'Exact text to find in the file (must match exactly)',
+            },
+            new_text: {
+              type: 'string',
+              description: 'Text to replace it with',
+            },
+          },
+          required: ['old_text', 'new_text'],
+        },
+      },
+    },
+    required: ['path', 'edits'],
+  },
+  async handler(input) {
+    const filePath = input.path as string;
+    const edits = input.edits as EditBlock[];
+    const absolutePath = resolveSafePath(filePath);
+
+    // Read original content
+    const oldContent = await fs.readFile(absolutePath, 'utf8');
+    let newContent = oldContent;
+
+    // Track which edits were applied
+    const appliedEdits: Array<{ old_text: string; new_text: string; applied: boolean }> = [];
+
+    // Apply each edit in order
+    for (const edit of edits) {
+      const wasFound = newContent.includes(edit.old_text);
+      if (wasFound) {
+        newContent = newContent.replace(edit.old_text, edit.new_text);
+      }
+      appliedEdits.push({
+        old_text: edit.old_text,
+        new_text: edit.new_text,
+        applied: wasFound,
+      });
+    }
+
+    // Check if any edits failed to find their target
+    const failedEdits = appliedEdits.filter((e) => !e.applied);
+    if (failedEdits.length > 0) {
+      const failedTexts = failedEdits
+        .map((e) => `"${e.old_text.slice(0, 50)}${e.old_text.length > 50 ? '...' : ''}"`)
+        .join(', ');
+      throw new Error(
+        `Failed to find text to replace: ${failedTexts}. ` +
+          'Make sure old_text matches exactly (including whitespace).'
+      );
+    }
+
+    // Write the modified content
+    await fs.writeFile(absolutePath, newContent, 'utf8');
+
+    return {
+      path: filePath,
+      oldContent,
+      newContent,
+      editsApplied: appliedEdits.length,
+      success: true,
+    };
+  },
+};
