@@ -43,5 +43,3 @@ export function resolveSafePath(relativePath: string): string {
 
   return absolutePath;
 }
-
-

@@ -562,6 +562,75 @@ function ToolCallView({ toolCall }: { toolCall: ToolCall }) {
 
 ---
 
+### Phase 7: Production Hardening
+**Duration**: 6-8 hours  
+**Goal**: Add robustness, reliability, and operational features for production use
+
+#### 7.1 Error Handling & Retry Logic
+
+- [ ] Implement retry policy for transient LLM API failures
+  - Exponential backoff: 1s, 2s, 4s (max 3 attempts)
+  - Distinguish retryable (5xx, timeout) vs non-retryable (4xx) errors
+- [ ] Add circuit breaker for repeated failures
+- [ ] Surface tool execution errors to LLM with structured format
+- [ ] Graceful degradation when tools fail (continue conversation)
+- [ ] Request timeout handling (30s default, configurable)
+
+#### 7.2 Context Window Management
+
+- [ ] Implement token counting (tiktoken or approximation)
+- [ ] Track cumulative token usage per session
+- [ ] Auto-truncation strategy when approaching context limit:
+  - Preserve system prompt and recent N messages
+  - Summarize older messages via LLM call
+  - Or sliding window with configurable size
+- [ ] Expose context usage in UI (e.g., "4,200 / 128,000 tokens")
+
+#### 7.3 Streaming Robustness
+
+- [ ] Add buffer timeout for incomplete streaming chunks (10s)
+- [ ] Handle malformed JSON in tool call arguments gracefully
+- [ ] Emit partial tool_call events during streaming (show tool name before args complete)
+- [ ] Reconnection logic for dropped SSE connections
+- [ ] Heartbeat/keepalive for long-running operations
+
+#### 7.4 Security Hardening
+
+- [ ] Rate limiting per session/IP
+- [ ] Input sanitization for shell commands (beyond current blocklist)
+- [ ] Audit logging for all tool executions
+- [ ] Configurable tool allowlist/denylist
+- [ ] File operation size limits (prevent reading huge files)
+- [ ] Shell command timeout (default 60s)
+
+#### 7.5 Observability
+
+- [ ] Structured logging (JSON format for log aggregation)
+- [ ] Request tracing with correlation IDs
+- [ ] Metrics endpoint (`/metrics` for Prometheus)
+  - Request latency histograms
+  - Tool execution counts and durations
+  - Token usage per model
+  - Error rates by type
+- [ ] Health check with dependency status
+
+#### 7.6 Configuration & Operations
+
+- [ ] Environment-based configuration (dev/staging/prod)
+- [ ] Runtime config reload without restart
+- [ ] Graceful shutdown (drain active sessions)
+- [ ] Database/persistence layer for session history (optional)
+
+#### Success Criteria
+
+- [ ] Agent recovers from transient API failures automatically
+- [ ] Long conversations don't exceed context limits
+- [ ] Dropped connections reconnect seamlessly
+- [ ] All tool executions are audit-logged
+- [ ] Metrics available for monitoring dashboards
+
+---
+
 ## Success Criteria (Overall)
 
 ### Functional Requirements
@@ -714,5 +783,7 @@ MAX_TOKENS=4096                        # Max response tokens (default: 4096)
 | Phase 4: Basic Chat UI | 4-5 hours | 14-20 hours |
 | Phase 5: Tool Call UI | 4-5 hours | 18-25 hours |
 | Phase 6: Polish & Controls | 3-4 hours | 21-29 hours |
+| Phase 7: Production Hardening | 6-8 hours | 27-37 hours |
 
-**Total Estimated Time**: 21-29 hours (3-4 days of focused work)
+**MVP (Phases 0-6)**: 21-29 hours (3-4 days of focused work)  
+**Production-Ready (Phases 0-7)**: 27-37 hours (4-5 days of focused work)

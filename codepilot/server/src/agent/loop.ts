@@ -1,0 +1,208 @@
+/**
+ * Agent loop implementation
+ * Handles the conversation loop with LLM, streaming responses, and tool execution
+ */
+
+import type { ChatCompletionMessageParam } from 'openai/resources/chat/completions';
+import type { FunctionParameters } from 'openai/resources/shared';
+import type { ToolDefinition, StreamEvent, ToolCall } from '../types';
+import { createLLMClient, type ToolDef } from '../llm-client';
+import { getToolByName } from '../tools/index';
+import {
+  CODING_AGENT_SYSTEM_PROMPT,
+  systemMessage,
+  userMessage,
+  assistantToolCallMessage,
+  toolResultMessage,
+  ToolCallAccumulator,
+  type ParsedToolCall,
+} from './messages';
+
+// Maximum number of tool call rounds to prevent infinite loops
+const MAX_TOOL_ROUNDS = 20;
+
+/**
+ * Configuration for the agent loop
+ */
+export interface AgentLoopConfig {
+  /** Initial user message to process */
+  userPrompt: string;
+  /** Available tools for the agent */
+  tools: ToolDefinition[];
+  /** Optional existing conversation history */
+  conversationHistory?: ChatCompletionMessageParam[];
+  /** Optional custom system prompt */
+  systemPrompt?: string;
+}
+
+/**
+ * Runs the agent loop as an async generator
+ * Yields StreamEvents as the agent processes the request
+ *
+ * The loop:
+ * 1. Sends messages to the LLM with tool definitions
+ * 2. Streams text deltas back to the caller
+ * 3. When tool calls are detected, executes them and continues
+ * 4. Repeats until no more tool calls or max rounds reached
+ */
+export async function* runAgentLoop(config: AgentLoopConfig): AsyncGenerator<StreamEvent> {
+  const { userPrompt, tools, systemPrompt = CODING_AGENT_SYSTEM_PROMPT } = config;
+
+  // Initialize LLM client
+  const llm = createLLMClient();
+
+  // Build initial messages array
+  const messages: ChatCompletionMessageParam[] = config.conversationHistory
+    ? [...config.conversationHistory]
+    : [systemMessage(systemPrompt)];
+
+  // Add the user's message
+  messages.push(userMessage(userPrompt));
+
+  // Tool definitions for the API (cast inputSchema to FunctionParameters for OpenAI compatibility)
+  const toolDefs: ToolDef[] = tools.map((t) => ({
+    name: t.name,
+    description: t.description,
+    inputSchema: t.inputSchema as FunctionParameters,
+  }));
+
+  let roundCount = 0;
+
+  // Main agent loop - continues until no tool calls or max rounds
+  while (roundCount < MAX_TOOL_ROUNDS) {
+    roundCount++;
+
+    // Stream the LLM response
+    const stream = await llm.streamChatWithTools(messages, toolDefs);
+
+    // Accumulate content and tool calls from the stream
+    let contentAccumulator = '';
+    const toolCallAccumulator = new ToolCallAccumulator();
+
+    // Process streaming chunks
+    for await (const chunk of stream) {
+      const choice = chunk.choices[0];
+      if (!choice) continue;
+
+      const delta = choice.delta;
+
+      // Handle text content delta
+      if (delta.content) {
+        contentAccumulator += delta.content;
+        yield { type: 'text_delta', text: delta.content };
+      }
+
+      // Handle tool call deltas (streamed incrementally)
+      if (delta.tool_calls) {
+        for (const tc of delta.tool_calls) {
+          toolCallAccumulator.addDelta({
+            index: tc.index,
+            id: tc.id,
+            function: tc.function,
+          });
+        }
+      }
+    }
+
+    // Get the final parsed tool calls
+    const parsedToolCalls = toolCallAccumulator.getToolCalls();
+
+    // If no tool calls, we're done
+    if (!toolCallAccumulator.hasToolCalls()) {
+      yield { type: 'done' };
+      break;
+    }
+
+    // Add assistant message with tool calls to history
+    messages.push(
+      assistantToolCallMessage(
+        parsedToolCalls.map((tc) => ({
+          id: tc.id,
+          name: tc.name,
+          arguments: tc.arguments,
+        })),
+        contentAccumulator || null
+      )
+    );
+
+    // Execute each tool call and collect results
+    for (const parsedTC of parsedToolCalls) {
+      // Parse arguments once to avoid redundant parsing
+      const input = safeParseJSON(parsedTC.arguments);
+
+      // Yield pending tool call event
+      const pendingToolCall: ToolCall = {
+        id: parsedTC.id,
+        name: parsedTC.name,
+        input,
+        status: 'pending',
+      };
+      yield { type: 'tool_call', toolCall: pendingToolCall };
+
+      // Execute the tool with pre-parsed input
+      const result = await executeToolCall(parsedTC, input);
+
+      // Create a new object for the result event (don't mutate the pending one)
+      const completedToolCall: ToolCall = {
+        id: parsedTC.id,
+        name: parsedTC.name,
+        input,
+        status: result.isError ? 'error' : 'completed',
+        ...(result.isError ? { error: String(result.value) } : { result: result.value }),
+      };
+
+      yield { type: 'tool_result', toolCall: completedToolCall };
+
+      // Add tool result to messages for next LLM call
+      messages.push(toolResultMessage(parsedTC.id, result.value, result.isError));
+    }
+  }
+
+  // If we hit max rounds, yield an error and done event for consistent completion signal
+  if (roundCount >= MAX_TOOL_ROUNDS) {
+    yield {
+      type: 'error',
+      error: `Agent stopped after ${MAX_TOOL_ROUNDS} tool call rounds to prevent infinite loops`,
+    };
+    yield { type: 'done' };
+  }
+}
+
+/**
+ * Executes a single tool call by looking up the handler and running it
+ * @param parsedTC - The parsed tool call from the LLM
+ * @param input - Pre-parsed arguments to avoid redundant JSON parsing
+ */
+async function executeToolCall(
+  parsedTC: ParsedToolCall,
+  input: Record<string, unknown>
+): Promise<{ value: unknown; isError: boolean }> {
+  const tool = getToolByName(parsedTC.name);
+
+  if (!tool) {
+    return {
+      value: `Unknown tool: ${parsedTC.name}`,
+      isError: true,
+    };
+  }
+
+  try {
+    const result = await tool.handler(input);
+    return { value: result, isError: false };
+  } catch (err) {
+    const errorMessage = err instanceof Error ? err.message : String(err);
+    return { value: errorMessage, isError: true };
+  }
+}
+
+/**
+ * Safely parses JSON, returning an empty object on failure
+ */
+function safeParseJSON(jsonString: string): Record<string, unknown> {
+  try {
+    return JSON.parse(jsonString);
+  } catch {
+    console.error('Failed to parse tool arguments:', jsonString);
+    return {};
+  }
+}

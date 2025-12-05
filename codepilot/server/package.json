@@ -11,6 +11,7 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
     "@elysiajs/node": "^1.2.11",
+    "dotenv": "^17.2.3",
     "elysia": "^1.2.25",
     "openai": "^4.77.3"
   },
