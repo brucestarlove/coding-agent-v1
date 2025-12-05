@@ -25,8 +25,23 @@ import { chatRoutes, streamRoutes } from './routes/index';
 // Server port from environment or default
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3001;
 
+// CORS configuration for development
+const CORS_ORIGIN = process.env.CORS_ORIGIN || 'http://localhost:5173';
+
 // Create Elysia app with Node.js adapter
 const app = new Elysia({ adapter: node() })
+  // CORS headers for cross-origin requests from frontend
+  .onRequest(({ set }) => {
+    set.headers['Access-Control-Allow-Origin'] = CORS_ORIGIN;
+    set.headers['Access-Control-Allow-Methods'] = 'GET, POST, DELETE, OPTIONS';
+    set.headers['Access-Control-Allow-Headers'] = 'Content-Type';
+  })
+  // Handle preflight OPTIONS requests
+  .options('/*', ({ set }) => {
+    set.status = 204;
+    return '';
+  })
+
   // Health check endpoint
   .get('/health', () => ({ status: 'ok', timestamp: new Date().toISOString() }))
 
