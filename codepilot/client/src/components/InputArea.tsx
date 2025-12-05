@@ -88,6 +88,7 @@ export function InputArea() {
               onKeyDown={handleKeyDown}
               onInput={handleInput}
               placeholder={isStreaming ? 'Waiting for response...' : 'Ask CodePilot anything...'}
+              aria-label={isStreaming ? 'Waiting for response' : 'Ask CodePilot anything'}
               disabled={isStreaming}
               rows={1}
               className="

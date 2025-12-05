@@ -66,7 +66,7 @@ interface AgentState {
 // API Configuration
 // ============================================================================
 
-const API_BASE = 'http://localhost:3001/api';
+const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3001/api';
 
 // ============================================================================
 // Store Implementation
@@ -152,14 +152,36 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       });
 
       if (!response.ok) {
-        throw new Error(`Stop failed: ${response.status}`);
+        // Get error details from response if available
+        let errorDetails = `${response.status} ${response.statusText}`;
+        try {
+          const errorBody = await response.text();
+          if (errorBody) {
+            errorDetails += `: ${errorBody}`;
+          }
+        } catch {
+          // Ignore errors reading response body
+        }
+
+        const errorMessage = `Stop failed: ${errorDetails}`;
+        console.error('[Store] Failed to stop agent:', errorMessage);
+
+        // Ensure store state is updated even on failure
+        get().finalizeResponse();
+        set({ status: 'idle' });
+        return;
       }
 
       // Finalize any pending response
       get().finalizeResponse();
       set({ status: 'idle' });
     } catch (err) {
-      console.error('[Store] Failed to stop agent:', err);
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      console.error('[Store] Failed to stop agent:', errorMessage);
+
+      // Ensure store state is updated even on failure
+      get().finalizeResponse();
+      set({ status: 'idle' });
     }
   },
 

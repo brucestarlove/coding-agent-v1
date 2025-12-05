@@ -7,7 +7,7 @@
  * - Re-enables auto-scroll when user scrolls back to bottom
  */
 
-import { useEffect, useRef, useCallback, type RefObject } from 'react';
+import { useEffect, useRef, useCallback, useState, type RefObject } from 'react';
 
 /** Threshold in pixels - if within this distance of bottom, auto-scroll is active */
 const SCROLL_THRESHOLD = 100;
@@ -37,6 +37,7 @@ export function useAutoScroll({
 }: UseAutoScrollOptions): UseAutoScrollReturn {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const isAtBottomRef = useRef(true);
+  const [isAtBottom, setIsAtBottom] = useState(true);
 
   /**
    * Check if container is scrolled near the bottom
@@ -61,7 +62,21 @@ export function useAutoScroll({
       behavior: 'smooth',
     });
     isAtBottomRef.current = true;
+    setIsAtBottom(true);
   }, []);
+
+  /**
+   * Initialize isAtBottom state when container is available
+   */
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container || !enabled) return;
+
+    // Sync initial state
+    const initialIsAtBottom = checkIsAtBottom();
+    isAtBottomRef.current = initialIsAtBottom;
+    setIsAtBottom(initialIsAtBottom);
+  }, [enabled, checkIsAtBottom]);
 
   /**
    * Handle scroll events to track if user is at bottom
@@ -71,7 +86,9 @@ export function useAutoScroll({
     if (!container || !enabled) return;
 
     const handleScroll = () => {
-      isAtBottomRef.current = checkIsAtBottom();
+      const newIsAtBottom = checkIsAtBottom();
+      isAtBottomRef.current = newIsAtBottom;
+      setIsAtBottom(newIsAtBottom);
     };
 
     container.addEventListener('scroll', handleScroll, { passive: true });
@@ -100,7 +117,7 @@ export function useAutoScroll({
   return {
     containerRef,
     scrollToBottom,
-    isAtBottom: isAtBottomRef.current,
+    isAtBottom,
   };
 }
 

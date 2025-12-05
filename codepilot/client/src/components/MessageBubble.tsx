@@ -101,7 +101,9 @@ function ToolCallBadge({ toolCall }: { toolCall: ToolCall }) {
       `}
     >
       <div className="flex items-center gap-2">
-        <span>{statusIcons[toolCall.status]}</span>
+        <span aria-label={`Status: ${toolCall.status}`} role="img">
+          {statusIcons[toolCall.status]}
+        </span>
         <span className="font-semibold">{toolCall.name}</span>
       </div>
       

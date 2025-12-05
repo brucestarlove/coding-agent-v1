@@ -164,10 +164,33 @@ export function updateSessionStatus(
 }
 
 /**
- * Get all sessions (for debugging/admin)
+ * Safe read-only representation of a session for API responses
+ * Excludes non-serializable fields (AbortController, EventQueue)
  */
-export function getAllSessions(): SessionState[] {
-  return Array.from(sessions.values()).map(s => ({ ...s }));
+export interface SessionDTO {
+  id: string;
+  status: SessionState['status'];
+  workingDir: string;
+  createdAt: Date;
+  messageCount: number;
+  /** Deep copy of messages - safe to read, won't affect server state */
+  messages: ChatCompletionMessageParam[];
+}
+
+/**
+ * Get all sessions (for debugging/admin)
+ * Returns safe DTOs that won't allow mutation of server state
+ */
+export function getAllSessions(): SessionDTO[] {
+  return Array.from(sessions.values()).map((s): SessionDTO => ({
+    id: s.id,
+    status: s.status,
+    workingDir: s.workingDir,
+    createdAt: new Date(s.createdAt.getTime()), // Clone the Date
+    messageCount: s.messages.length,
+    // Deep clone messages to prevent mutation of server state
+    messages: structuredClone(s.messages),
+  }));
 }
 
 /**

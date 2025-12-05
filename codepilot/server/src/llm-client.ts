@@ -21,7 +21,7 @@ function getEnvConfig() {
   const openRouterModel =
     process.env.OPENROUTER_MODEL ||
     process.env.OPENROUTER_MODEL_SONNET ||
-    'anthropic/claude-sonnet-4-20250514';
+    'anthropic/claude-sonnet-4.5';
 
   return {
     openRouterApiKey: process.env.OPENROUTER_API_KEY,
@@ -38,6 +38,15 @@ export function getAvailableModels() {
     haiku: process.env.OPENROUTER_MODEL_HAIKU || 'anthropic/claude-haiku-4.5',
     opus: process.env.OPENROUTER_MODEL_OPUS || 'anthropic/claude-opus-4.5',
   };
+}
+
+/**
+ * Capabilities that an LLM client may or may not support
+ * Check these before calling methods that depend on them
+ */
+export interface LLMClientCapabilities {
+  /** Whether the client supports tool calling via streamChatWithTools */
+  tools: boolean;
 }
 
 /**
@@ -103,6 +112,8 @@ function createOpenRouterClient(env: ReturnType<typeof getEnvConfig>) {
     provider: 'openrouter' as const,
     model,
     client,
+    /** OpenRouter supports tool calling */
+    capabilities: { tools: true } as LLMClientCapabilities,
 
     /**
      * Stream a chat completion (OpenAI format) - basic version without tools
@@ -114,6 +125,7 @@ function createOpenRouterClient(env: ReturnType<typeof getEnvConfig>) {
           role: msg.role,
           content: msg.content,
         })),
+        max_tokens: maxTokens,
         stream: true,
       });
       return stream;
@@ -158,6 +170,8 @@ function createAnthropicClient(env: ReturnType<typeof getEnvConfig>) {
     provider: 'anthropic' as const,
     model: 'claude-3-5-sonnet-20241022',
     client,
+    /** Anthropic direct client does not yet support tool calling - use OpenRouter instead */
+    capabilities: { tools: false } as LLMClientCapabilities,
 
     /**
      * Stream a message (Anthropic format)
