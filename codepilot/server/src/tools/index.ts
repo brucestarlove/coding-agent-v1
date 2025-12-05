@@ -6,6 +6,7 @@ import type { ToolDefinition } from '../types';
 import { readFileTool, writeFileTool, listDirTool, editFileTool } from './fileTools';
 import { runShellTool } from './shellTool';
 import { gitDiffTool, gitStatusTool, gitLogTool } from './gitTools';
+import { grepTool, findFilesTool } from './searchTools';
 
 // Re-export utilities for convenience
 export { resolveSafePath, getProjectRoot } from './utils';
@@ -22,6 +23,8 @@ export const tools: ToolDefinition[] = [
   gitDiffTool,
   gitStatusTool,
   gitLogTool,
+  grepTool,
+  findFilesTool,
 ];
 
 /**
