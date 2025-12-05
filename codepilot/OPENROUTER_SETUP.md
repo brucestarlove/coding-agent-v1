@@ -122,4 +122,3 @@ If you prefer to use Anthropic directly:
 - OpenRouter Docs: https://openrouter.ai/docs
 - OpenRouter Discord: https://discord.gg/openrouter
 - Anthropic Docs: https://docs.anthropic.com/
-

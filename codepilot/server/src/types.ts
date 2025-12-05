@@ -70,4 +70,3 @@ export interface Session {
   createdAt: Date;
   workingDir: string;
 }
-
