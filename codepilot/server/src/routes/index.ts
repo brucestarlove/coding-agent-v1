@@ -5,3 +5,4 @@
 
 export { chatRoutes } from './chat';
 export { streamRoutes } from './stream';
+export { plansRoutes } from './plans';

@@ -19,6 +19,8 @@ import {
   updateDbSessionStatus,
   updateDbSessionWorkingDir,
   updateDbSessionTitle,
+  updateDbSessionPlan,
+  getDbSessionPlan,
   deleteDbSession,
   incrementDbSessionTokens,
   insertMessage,
@@ -284,6 +286,29 @@ export function incrementTokens(sessionId: string, tokens: number): void {
 
   // Update database
   incrementDbSessionTokens(sessionId, tokens);
+}
+
+/**
+ * Set the current plan for a session
+ * Used after Create Plan or Revise Plan commands
+ */
+export function setSessionPlan(sessionId: string, plan: string): void {
+  updateDbSessionPlan(sessionId, plan);
+}
+
+/**
+ * Get the current plan for a session
+ * Used by Revise Plan and Implement Complex commands
+ */
+export function getSessionPlan(sessionId: string): string | null {
+  return getDbSessionPlan(sessionId);
+}
+
+/**
+ * Check if a session has a current plan
+ */
+export function hasSessionPlan(sessionId: string): boolean {
+  return getDbSessionPlan(sessionId) !== null;
 }
 
 /**

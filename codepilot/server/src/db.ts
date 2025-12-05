@@ -65,6 +65,13 @@ function initSchema(db: Database.Database): void {
     // Column already exists, ignore
   }
 
+  // Add current_plan column for storing generated plans (migration)
+  try {
+    db.exec(`ALTER TABLE sessions ADD COLUMN current_plan TEXT`);
+  } catch {
+    // Column already exists, ignore
+  }
+
   // Messages table
   db.exec(`
     CREATE TABLE IF NOT EXISTS messages (
@@ -106,6 +113,7 @@ export interface DbSession {
   working_dir: string;
   title: string | null;
   total_tokens: number;
+  current_plan: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -185,6 +193,26 @@ export function deleteDbSession(id: string): boolean {
   const stmt = getDb().prepare('DELETE FROM sessions WHERE id = ?');
   const result = stmt.run(id);
   return result.changes > 0;
+}
+
+/**
+ * Get session's current plan
+ */
+export function getDbSessionPlan(id: string): string | null {
+  const stmt = getDb().prepare('SELECT current_plan FROM sessions WHERE id = ?');
+  const row = stmt.get(id) as { current_plan: string | null } | undefined;
+  return row?.current_plan ?? null;
+}
+
+/**
+ * Update session's current plan
+ */
+export function updateDbSessionPlan(id: string, plan: string | null): void {
+  const now = new Date().toISOString();
+  const stmt = getDb().prepare(`
+    UPDATE sessions SET current_plan = ?, updated_at = ? WHERE id = ?
+  `);
+  stmt.run(plan, now, id);
 }
 
 /**

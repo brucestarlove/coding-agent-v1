@@ -2,6 +2,7 @@
  * Chat Routes
  * Handles starting new conversations and managing sessions
  * Persists messages to SQLite as they stream
+ * Supports Agent Commands for specialized workflow modes
  */
 
 import { Elysia, t } from 'elysia';
@@ -15,10 +16,15 @@ import {
   incrementTokens,
   getMessages,
   prepareSessionForContinuation,
+  setSessionPlan,
+  getSessionPlan,
+  hasSessionPlan,
 } from '../session';
 import { runAgentLoop } from '../agent/index';
 import { tools } from '../tools/index';
 import { userMessage, assistantMessage, assistantToolCallMessage, toolResultMessage } from '../agent/messages';
+import { resolveCommand, getSystemPrompt, type CommandId } from '../agent/commands';
+import { savePlan, extractTitleFromContent, detectPlanType } from '../plans';
 import type { ToolCall } from '../types';
 
 /**
@@ -35,10 +41,17 @@ export const chatRoutes = new Elysia({ prefix: '/api' })
   .post(
     '/chat',
     async ({ body }) => {
-      const { message, workingDir, model } = body;
+      const { message, workingDir, model, command } = body;
 
       // Create a new session
       const session = createSession(workingDir);
+
+      // Resolve the command (includes detection and classification)
+      const { command: resolvedCommand, cleanedMessage } = await resolveCommand(
+        command as CommandId | null,
+        message,
+        false // New session has no plan yet
+      );
 
       // Mark session as running
       updateSessionStatus(session.id, 'running');
@@ -46,17 +59,32 @@ export const chatRoutes = new Elysia({ prefix: '/api' })
       // Persist the user message immediately
       persistMessage(session.id, userMessage(message));
 
-      // Spawn the agent loop with message persistence
-      spawnAgentLoop(session.id, message, session.workingDir, model);
+      // Get system prompt for the command
+      const systemPrompt = getSystemPrompt(resolvedCommand.id, null);
 
-      // Return session ID and working directory
-      return { sessionId: session.id, workingDir: session.workingDir };
+      // Spawn the agent loop with command-specific system prompt
+      spawnAgentLoop(
+        session.id,
+        cleanedMessage,
+        session.workingDir,
+        model,
+        systemPrompt,
+        resolvedCommand.id
+      );
+
+      // Return session ID, working directory, and resolved command
+      return {
+        sessionId: session.id,
+        workingDir: session.workingDir,
+        command: resolvedCommand.id,
+      };
     },
     {
       body: t.Object({
         message: t.String({ minLength: 1 }),
         workingDir: t.Optional(t.String()),
         model: t.Optional(t.String()),
+        command: t.Optional(t.String()),
       }),
     }
   )
@@ -68,7 +96,7 @@ export const chatRoutes = new Elysia({ prefix: '/api' })
   .post(
     '/chat/:id',
     async ({ params, body, set }) => {
-      const { message, model } = body;
+      const { message, model, command } = body;
 
       // Get and prepare session for continuation
       const session = prepareSessionForContinuation(params.id);
@@ -77,6 +105,17 @@ export const chatRoutes = new Elysia({ prefix: '/api' })
         set.status = 404;
         return { error: 'Session not found or is currently running' };
       }
+
+      // Check if session has a plan (for command resolution)
+      const hasPlan = hasSessionPlan(session.id);
+      const currentPlan = hasPlan ? getSessionPlan(session.id) : null;
+
+      // Resolve the command (includes detection and classification)
+      const { command: resolvedCommand, cleanedMessage } = await resolveCommand(
+        command as CommandId | null,
+        message,
+        hasPlan
+      );
 
       // Mark session as running
       updateSessionStatus(session.id, 'running');
@@ -87,16 +126,25 @@ export const chatRoutes = new Elysia({ prefix: '/api' })
       // Get existing conversation history from database
       const conversationHistory = getMessages(session.id);
 
+      // Get system prompt for the command (inject plan if relevant)
+      const systemPrompt = getSystemPrompt(resolvedCommand.id, currentPlan);
+
       // Spawn the agent loop with history
       spawnAgentLoopWithHistory(
         session.id,
-        message,
+        cleanedMessage,
         session.workingDir,
         conversationHistory,
-        model
+        model,
+        systemPrompt,
+        resolvedCommand.id
       );
 
-      return { sessionId: session.id, workingDir: session.workingDir };
+      return {
+        sessionId: session.id,
+        workingDir: session.workingDir,
+        command: resolvedCommand.id,
+      };
     },
     {
       params: t.Object({
@@ -105,6 +153,7 @@ export const chatRoutes = new Elysia({ prefix: '/api' })
       body: t.Object({
         message: t.String({ minLength: 1 }),
         model: t.Optional(t.String()),
+        command: t.Optional(t.String()),
       }),
     }
   )
@@ -154,12 +203,22 @@ function spawnAgentLoop(
   sessionId: string,
   userPrompt: string,
   workingDir: string,
-  model?: string
+  model?: string,
+  systemPrompt?: string,
+  commandId?: CommandId
 ): void {
   const session = getSession(sessionId);
   if (!session) return;
 
-  runAgentLoopWithPersistence(session, userPrompt, workingDir, undefined, model);
+  runAgentLoopWithPersistence(
+    session,
+    userPrompt,
+    workingDir,
+    undefined,
+    model,
+    systemPrompt,
+    commandId
+  );
 }
 
 /**
@@ -170,12 +229,22 @@ function spawnAgentLoopWithHistory(
   userPrompt: string,
   workingDir: string,
   conversationHistory: ChatCompletionMessageParam[],
-  model?: string
+  model?: string,
+  systemPrompt?: string,
+  commandId?: CommandId
 ): void {
   const session = getSession(sessionId);
   if (!session) return;
 
-  runAgentLoopWithPersistence(session, userPrompt, workingDir, conversationHistory, model);
+  runAgentLoopWithPersistence(
+    session,
+    userPrompt,
+    workingDir,
+    conversationHistory,
+    model,
+    systemPrompt,
+    commandId
+  );
 }
 
 /**
@@ -187,7 +256,9 @@ function runAgentLoopWithPersistence(
   userPrompt: string,
   workingDir: string,
   conversationHistory: ChatCompletionMessageParam[] | undefined,
-  model?: string
+  model?: string,
+  systemPrompt?: string,
+  commandId?: CommandId
 ): void {
   if (!session) return;
 
@@ -206,6 +277,7 @@ function runAgentLoopWithPersistence(
         conversationHistory,
         signal: session.abortController.signal,
         model,
+        systemPrompt,
       })) {
         // Push event to SSE queue
         session.eventQueue.push(event);
@@ -283,6 +355,31 @@ function runAgentLoopWithPersistence(
             // Persist any remaining text as final assistant message
             if (textAccumulator) {
               persistMessage(session.id, assistantMessage(textAccumulator));
+
+              // If this was a create_plan, revise_plan, or research command, store and save the plan
+              if (commandId === 'create_plan' || commandId === 'revise_plan' || commandId === 'research') {
+                // Extract plan from the response (look for markdown structure)
+                const planContent = extractPlanFromResponse(textAccumulator);
+                if (planContent) {
+                  // Store in session database
+                  setSessionPlan(session.id, planContent);
+
+                  // Also save as a file for cross-session access
+                  try {
+                    const title = extractTitleFromContent(planContent);
+                    const type = commandId === 'research' ? 'research' : detectPlanType(planContent);
+                    await savePlan(workingDir, title, planContent, {
+                      type,
+                      sessionId: session.id,
+                      tags: [],
+                    });
+                    console.log(`[Chat] Saved plan to file: ${title}`);
+                  } catch (saveErr) {
+                    console.error('[Chat] Failed to save plan to file:', saveErr);
+                  }
+                }
+              }
+
               textAccumulator = '';
             }
             // Update session status
@@ -306,4 +403,32 @@ function runAgentLoopWithPersistence(
       session.eventQueue.close();
     }
   })();
+}
+
+/**
+ * Extract plan content from an agent's response
+ * Looks for structured markdown content that represents a plan
+ */
+function extractPlanFromResponse(response: string): string | null {
+  // If the response contains plan-like structure, use the whole thing
+  // Otherwise, try to extract just the plan section
+  
+  const hasPlanStructure = 
+    /^##?\s+(overview|plan|implementation|steps|files)/im.test(response) ||
+    (response.match(/^\d+\.\s+/gm) || []).length >= 3 ||
+    response.includes('## Implementation Steps') ||
+    response.includes('## Files to Modify');
+
+  if (hasPlanStructure) {
+    return response;
+  }
+
+  // Try to extract a plan section if present
+  const planMatch = response.match(/## Plan[\s\S]*?(?=\n## [^P]|$)/i);
+  if (planMatch) {
+    return planMatch[0];
+  }
+
+  // No clear plan structure found
+  return null;
 }

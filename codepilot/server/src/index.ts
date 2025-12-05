@@ -20,8 +20,9 @@ if (result.error) {
 import { Elysia } from 'elysia';
 import { node } from '@elysiajs/node';
 import { tools } from './tools/index';
-import { chatRoutes, streamRoutes } from './routes/index';
+import { chatRoutes, streamRoutes, plansRoutes } from './routes/index';
 import { getAvailableModels } from './llm-client';
+import { getDropdownCommands } from './agent/commands';
 
 // Server port from environment or default
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3001;
@@ -76,9 +77,19 @@ const app = new Elysia({ adapter: node() })
     };
   })
 
+  // List available agent commands
+  .get('/api/commands', () => {
+    const commands = getDropdownCommands();
+    return {
+      commands,
+      default: 'chat',
+    };
+  })
+
   // Register API routes
   .use(chatRoutes)
   .use(streamRoutes)
+  .use(plansRoutes)
 
   .listen(PORT);
 

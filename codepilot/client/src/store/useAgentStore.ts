@@ -52,6 +52,13 @@ export interface ModelOption {
   contextWindow: number;
 }
 
+/** Available command for selection */
+export interface CommandOption {
+  id: string;
+  name: string;
+  description: string;
+}
+
 /** Session summary for listing */
 export interface SessionSummary {
   id: string;
@@ -63,6 +70,24 @@ export interface SessionSummary {
   messageCount: number;
   totalTokens: number;
   preview: string | null;
+}
+
+/** Plan summary for listing */
+export interface PlanSummary {
+  id: string;
+  title: string;
+  type: 'implementation' | 'research' | 'custom';
+  createdAt: string;
+  updatedAt: string;
+  sessionId: string | null;
+  tags: string[];
+  filePath: string;
+  preview: string;
+}
+
+/** Full plan with content */
+export interface Plan extends PlanSummary {
+  content: string;
 }
 
 // ============================================================================
@@ -94,12 +119,21 @@ interface AgentState {
   selectedModel: string | null;
   availableModels: ModelOption[];
 
+  // Command selection
+  selectedCommand: string | null;
+  availableCommands: CommandOption[];
+
   // Last message for retry functionality
   lastUserMessage: string | null;
 
   // Session management
   sessions: SessionSummary[];
   isSessionSheetOpen: boolean;
+
+  // Plans management
+  plans: PlanSummary[];
+  selectedPlan: Plan | null;
+  isPlansSheetOpen: boolean;
 
   // Actions
   sendMessage: (text: string) => Promise<void>;
@@ -116,12 +150,24 @@ interface AgentState {
   setSelectedModel: (modelId: string) => void;
   fetchAvailableModels: () => Promise<void>;
 
+  // Command selection
+  setSelectedCommand: (commandId: string) => void;
+  fetchAvailableCommands: () => Promise<void>;
+
   // Session management actions
   fetchSessions: () => Promise<void>;
   loadSession: (sessionId: string) => Promise<void>;
   deleteSession: (sessionId: string) => Promise<void>;
   updateSessionTitle: (sessionId: string, title: string) => Promise<void>;
   setSessionSheetOpen: (open: boolean) => void;
+
+  // Plans management actions
+  fetchPlans: () => Promise<void>;
+  loadPlan: (filename: string) => Promise<Plan | null>;
+  deletePlan: (filename: string) => Promise<void>;
+  setPlansSheetOpen: (open: boolean) => void;
+  /** Insert a plan's content into the input (for implement commands) */
+  usePlanForImplement: (plan: Plan) => void;
 
   // Streaming handlers (called by useSSE hook)
   appendText: (text: string) => void;
@@ -154,9 +200,14 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   tokenUsage: null,
   selectedModel: null,
   availableModels: [],
+  selectedCommand: null,
+  availableCommands: [],
   lastUserMessage: null,
   sessions: [],
   isSessionSheetOpen: false,
+  plans: [],
+  selectedPlan: null,
+  isPlansSheetOpen: false,
 
   /**
    * Send a message to start a new conversation or continue existing one.
@@ -190,13 +241,23 @@ export const useAgentStore = create<AgentState>((set, get) => ({
 
     try {
       // Start new conversation via API
-      const { selectedModel, workingDir } = get();
+      const { selectedModel, selectedCommand, selectedPlan, workingDir } = get();
+      
+      // If we have a selected plan and command is implement, include plan in message
+      let messageToSend = text;
+      if (selectedPlan && selectedCommand === 'implement') {
+        messageToSend = `${text}\n\n## Plan to Implement\n\n${selectedPlan.content}`;
+        // Clear the selected plan after using it
+        set({ selectedPlan: null });
+      }
+      
       const response = await fetch(`${API_BASE}/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
-          message: text,
+          message: messageToSend,
           model: selectedModel || undefined,
+          command: selectedCommand || undefined,
           workingDir: workingDir || undefined,
         }),
       });
@@ -380,6 +441,32 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       });
     } catch (err) {
       console.error('[Store] Failed to fetch models:', err);
+    }
+  },
+
+  /**
+   * Set the selected command for new messages
+   */
+  setSelectedCommand: (commandId: string) => {
+    set({ selectedCommand: commandId });
+  },
+
+  /**
+   * Fetch available commands from the server
+   */
+  fetchAvailableCommands: async () => {
+    try {
+      const response = await fetch(`${API_BASE}/commands`);
+      if (!response.ok) {
+        throw new Error(`Failed to fetch commands: ${response.status}`);
+      }
+      const data = await response.json();
+      set({
+        availableCommands: data.commands,
+        selectedCommand: get().selectedCommand || data.default,
+      });
+    } catch (err) {
+      console.error('[Store] Failed to fetch commands:', err);
     }
   },
 
@@ -573,6 +660,96 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     if (open) {
       get().fetchSessions();
     }
+  },
+
+  // ============================================================================
+  // Plans Management Actions
+  // ============================================================================
+
+  /**
+   * Fetch all plans from the server
+   */
+  fetchPlans: async () => {
+    try {
+      const { workingDir } = get();
+      const params = workingDir ? `?workingDir=${encodeURIComponent(workingDir)}` : '';
+      const response = await fetch(`${API_BASE}/plans${params}`);
+      if (!response.ok) {
+        throw new Error(`Failed to fetch plans: ${response.status}`);
+      }
+      const data = await response.json();
+      set({ plans: data.plans });
+    } catch (err) {
+      console.error('[Store] Failed to fetch plans:', err);
+    }
+  },
+
+  /**
+   * Load a plan by filename
+   */
+  loadPlan: async (filename: string): Promise<Plan | null> => {
+    try {
+      const { workingDir } = get();
+      const params = workingDir ? `?workingDir=${encodeURIComponent(workingDir)}` : '';
+      const response = await fetch(`${API_BASE}/plans/${encodeURIComponent(filename)}${params}`);
+      if (!response.ok) {
+        throw new Error(`Failed to load plan: ${response.status}`);
+      }
+      const plan = await response.json();
+      set({ selectedPlan: plan });
+      return plan;
+    } catch (err) {
+      console.error('[Store] Failed to load plan:', err);
+      return null;
+    }
+  },
+
+  /**
+   * Delete a plan by filename
+   */
+  deletePlan: async (filename: string) => {
+    try {
+      const { workingDir } = get();
+      const params = workingDir ? `?workingDir=${encodeURIComponent(workingDir)}` : '';
+      const response = await fetch(`${API_BASE}/plans/${encodeURIComponent(filename)}${params}`, {
+        method: 'DELETE',
+      });
+
+      if (!response.ok) {
+        throw new Error(`Failed to delete plan: ${response.status}`);
+      }
+
+      // Remove from local plans list
+      set({
+        plans: get().plans.filter((p) => p.filePath !== filename),
+        selectedPlan: get().selectedPlan?.filePath === filename ? null : get().selectedPlan,
+      });
+    } catch (err) {
+      console.error('[Store] Failed to delete plan:', err);
+    }
+  },
+
+  /**
+   * Open/close the plans sheet
+   */
+  setPlansSheetOpen: (open: boolean) => {
+    set({ isPlansSheetOpen: open });
+    // Fetch plans when opening
+    if (open) {
+      get().fetchPlans();
+    }
+  },
+
+  /**
+   * Use a plan for implementation - sets command to implement and prepares message
+   */
+  usePlanForImplement: (plan: Plan) => {
+    // Set command to implement (will be classified as complex due to plan content)
+    set({
+      selectedCommand: 'implement',
+      selectedPlan: plan,
+      isPlansSheetOpen: false,
+    });
   },
 
   // ============================================================================

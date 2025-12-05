@@ -9,6 +9,7 @@ import React, { useEffect, useState } from 'react';
 import { ChatStream } from './components/ChatStream';
 import { InputArea } from './components/InputArea';
 import { SessionSheet } from './components/SessionSheet';
+import { PlansSheet } from './components/PlansSheet';
 import { useSSE } from './hooks/useSSE';
 import { useAgentStore } from './store/useAgentStore';
 
@@ -57,11 +58,13 @@ function App() {
   // Initialize SSE connection manager
   useSSE();
 
-  // Fetch available models on mount
+  // Fetch available models and commands on mount
   const fetchAvailableModels = useAgentStore((state) => state.fetchAvailableModels);
+  const fetchAvailableCommands = useAgentStore((state) => state.fetchAvailableCommands);
   useEffect(() => {
     fetchAvailableModels();
-  }, [fetchAvailableModels]);
+    fetchAvailableCommands();
+  }, [fetchAvailableModels, fetchAvailableCommands]);
 
   const status = useAgentStore((state) => state.status);
   const error = useAgentStore((state) => state.error);
@@ -88,6 +91,9 @@ function App() {
 
       {/* Session Sheet - slides down from top */}
       <SessionSheet />
+
+      {/* Plans Sheet - slides down from top */}
+      <PlansSheet />
     </div>
   );
 }
